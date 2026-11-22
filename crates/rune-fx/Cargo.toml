@@ -7,6 +7,7 @@ description = "Rune's special-effects layers: glow, pulses, electricity, fire, m
 autotests = false
 
 [dependencies]
+rune-gpu = { workspace = true }
 rune-motion = { workspace = true }
 rune-staging = { workspace = true }
 wgpu = { workspace = true, features = ["std", "parking_lot", "wgsl"] }

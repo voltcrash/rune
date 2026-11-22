@@ -1,0 +1,1 @@
+- Fixed blank Linux windows on software Vulkan renderers that cannot unpack half-precision clipping values.

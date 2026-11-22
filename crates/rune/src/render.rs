@@ -175,8 +175,10 @@ impl Default for LayerSpec {
 /// a window device-pixel position, `clip` an instance's `clip` and `fade` (`vec4<u32>`) its packed
 /// soft edges and rounded-clip radius, so a compositor shader cuts its effect with the same
 /// rectangle, feathers and circular or continuous corners as the primitives around it. Prepend it
-/// to the shader source.
+/// to the shader source and pass the assembled WGSL through [`clip_shader`] for the device.
 pub const CLIP_WGSL: &str = include_str!("shaders/clip.wgsl");
+
+pub use rune_gpu::clip_shader;
 
 /// The WGSL the precompiled DX12 bytecode is compiled from (Windfoil's, CRLF read as LF), its
 /// BLAKE3 and the hash of its pipeline layout, as the bytecode records them;

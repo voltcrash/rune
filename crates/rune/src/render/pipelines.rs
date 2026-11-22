@@ -18,7 +18,7 @@ impl Renderer {
             let source = format!("{CLIP_WGSL}\n{}\n{}", include_str!("../shaders/shader.wgsl"), crate::gpu::springs::SHADER);
             Some(device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("uber"),
-                source: wgpu::ShaderSource::Wgsl(source.into()),
+                source: rune_gpu::clip_shader(device, source),
             }))
         } else {
             None

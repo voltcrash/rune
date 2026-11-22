@@ -3902,6 +3902,7 @@ dependencies = [
  "bytemuck",
  "png 0.18.1",
  "rune",
+ "rune-gpu",
  "rune-motion",
  "rune-staging",
  "wgpu",

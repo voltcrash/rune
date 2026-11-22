@@ -58,7 +58,7 @@ impl Flat {
             self.formats.lock().unwrap().push(s.format);
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(format!("{CLIP_WGSL}\n{SHADER}").into()),
+                source: rune::render::clip_shader(device, format!("{CLIP_WGSL}\n{SHADER}")),
             });
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None, bind_group_layouts: &[Some(bgl)], immediate_size: 0,
