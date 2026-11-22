@@ -199,7 +199,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 fn wgsl_shader(device: &wgpu::Device, wgsl: &str) -> wgpu::ShaderModule {
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("uber"),
-        source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+        source: rune_gpu::clip_shader(device, wgsl),
     })
 }
 

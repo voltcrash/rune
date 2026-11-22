@@ -129,7 +129,7 @@ pub(crate) const BLUR_WGSL: &str = include_str!("../shaders/backdrop_blur.wgsl")
 pub(crate) fn composite_wgsl() -> String { format!("{CLIP_WGSL}\n{}", include_str!("../shaders/backdrop_composite.wgsl")) }
 
 fn composite_from_wgsl(device: &wgpu::Device, wgsl: &str) -> super::dxbc::Shaders {
-    super::dxbc::Shaders::one(device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("backdrop blur composite"), source: wgpu::ShaderSource::Wgsl(wgsl.into()) }))
+    super::dxbc::Shaders::one(device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("backdrop blur composite"), source: rune_gpu::clip_shader(device, wgsl) }))
 }
 
 pub(super) struct BackdropBlur {

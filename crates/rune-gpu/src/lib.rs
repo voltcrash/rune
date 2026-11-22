@@ -5,6 +5,7 @@
 //! wgpu's unless it chooses `GpuBackend::Metal`. Apps normally reach this crate through `rune`.
 
 pub mod backend;
+mod clip;
 pub mod health;
 #[cfg(all(target_vendor = "apple", feature = "metal-backend"))]
 pub mod metal;
@@ -14,6 +15,7 @@ pub mod springs;
 
 pub use backend::GpuBackend;
 pub use backend::describe as describe_gpu;
+pub use clip::clip_shader;
 
 #[cfg(target_os = "macos")]
 use objc2::runtime::AnyObject;

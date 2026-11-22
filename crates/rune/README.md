@@ -2185,7 +2185,9 @@ and its goldens are unchanged. `examples/lab` uses it to composite `rune-light` 
   follow `El::scale`, `El::offset` and a transition's scale and offset; under `El::rotate` the slot
   stays upright inside a turned isolated layer, and Rune turns what the hook painted.
 - `render::CLIP_WGSL` is Rune's own clip maths as WGSL (`clip_alpha(p, clip, fade)` with `p` in
-  window pixels, plus `sd_rounded`). Prepend it to a compositor shader and pass the slot's `clip`
+  window pixels, plus `sd_rounded`). Prepend it to the compositor shader and use
+  `render::clip_shader(device, source)` for the shader module's source so software Vulkan adapters
+  can decode the clip fades. Pass the slot's `clip`
   and `fade` words (`rune-fx` does this via `FxSlot::clip(i.clip, i.fade)` in `prepare_with_slots`), so the effect is cut
   by the same rectangle, feathers and circular or continuous
   rounded corners as the primitives around it. A compositor that skips this still gets the hard

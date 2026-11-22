@@ -113,7 +113,7 @@ impl Pipes {
             let (name, src) = SOURCES[kind];
             self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(name),
-                source: wgpu::ShaderSource::Wgsl(format!("{CLIP}\n{COMMON}\n{src}").into()),
+                source: rune_gpu::clip_shader(&self.device, format!("{CLIP}\n{COMMON}\n{src}")),
             })
         })
     }

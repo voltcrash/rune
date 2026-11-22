@@ -496,7 +496,7 @@ fn lcd_pipeline(device: &wgpu::Device, layout: &wgpu::PipelineLayout, format: wg
 fn compile(device: &wgpu::Device, wgsl: &str, make_pipeline: impl FnOnce(&dxbc::Shaders) -> wgpu::RenderPipeline) -> Result<(dxbc::Shaders, wgpu::RenderPipeline), String> {
     #[cfg(not(target_arch = "wasm32"))]
     let scopes = (device.push_error_scope(wgpu::ErrorFilter::Validation), device.push_error_scope(wgpu::ErrorFilter::Internal));
-    let shader = dxbc::Shaders::one(device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("uber"), source: wgpu::ShaderSource::Wgsl(wgsl.into()) }));
+    let shader = dxbc::Shaders::one(device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("uber"), source: rune_gpu::clip_shader(device, wgsl) }));
     let pipeline = make_pipeline(&shader);
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(error) = pollster::block_on(scopes.1.pop()).or(pollster::block_on(scopes.0.pop())) {
