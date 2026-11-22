@@ -62,12 +62,7 @@ impl RuntimeCore {
         if tx.minimize_order.take().is_some() { self.minimize_step(crate::window::MinimizeEvent::Asked); }
         self.host.titlebar.toggle_maximized |= std::mem::take(&mut tx.toggle_maximized);
         self.host.titlebar.toggle_full_screen |= std::mem::take(&mut tx.toggle_full_screen);
-        for input in tx.field_input.drain(..) {
-            match input {
-                crate::el::FieldInput::Key(ev) => self.key(ev),
-                crate::el::FieldInput::PasteText(revision, text) => self.frame.queue.push(Action::PasteText(revision, *text)),
-            }
-        }
+        self.latch_field_input(tx, 0);
         self.latch_playground(app, tx);
         for prefix in std::mem::take(&mut tx.evict_memos) { self.invalidate_memos_by_prefix(&prefix); }
         if !tx.open_urls.is_empty() { self.open_urls(std::mem::take(&mut tx.open_urls)); }
@@ -105,6 +100,26 @@ impl RuntimeCore {
         if let Some((sans, mono)) = tx.font_families.take() { self.set_font_families(&sans, &mono); }
         if let Some(srgb) = tx.srgb_blend.take() { self.set_srgb_blend(srgb); }
         if let Some(rewind) = tx.rewind.take() { self.motion.set_rewind(rewind); }
+        self.latch_focus(app, tx);
+        if let Some(title) = tx.title.take() { self.host.window_title.set(title); }
+        if let Some((text, how)) = tx.announce.take() { self.host.announcement.say(text, how); }
+        if let Some(mut request) = tx.window_frame.take() {
+            request.spring = (request.animate && !tx.commit.snaps() && !self.reduced_motion).then(|| tx.motion.map_or(crate::tok::motion::DEFAULT, MotionSource::spring));
+            self.host.window_frame = Some(self.host.window_frame.unwrap_or_default().merge(request));
+        }
+        crate::clipboard::flush_memory(self);
+    }
+
+    fn latch_field_input(&mut self, tx: &mut Tx, from: usize) {
+        for input in tx.field_input.drain(from..) {
+            match input {
+                crate::el::FieldInput::Key(ev) => self.key(ev),
+                crate::el::FieldInput::PasteText(revision, text) => self.frame.queue.push(Action::PasteText(revision, *text)),
+            }
+        }
+    }
+
+    fn latch_focus(&mut self, app: &mut dyn AppDriver, tx: &mut Tx) {
         if std::mem::take(&mut tx.blur) {
             if self.kbd.focus.path().is_some() {
                 self.set_focus(app, None, self.kbd.focus.keyboard());
@@ -119,13 +134,25 @@ impl RuntimeCore {
             self.kbd.focus_request = Some(request);
             self.commit.dirty = true;
         }
-        if let Some(title) = tx.title.take() { self.host.window_title.set(title); }
-        if let Some((text, how)) = tx.announce.take() { self.host.announcement.say(text, how); }
-        if let Some(mut request) = tx.window_frame.take() {
-            request.spring = (request.animate && !tx.commit.snaps() && !self.reduced_motion).then(|| tx.motion.map_or(crate::tok::motion::DEFAULT, MotionSource::spring));
-            self.host.window_frame = Some(self.host.window_frame.unwrap_or_default().merge(request));
+    }
+
+    /// Run field input chosen by a clipboard reader before the next host event in this frame.
+    pub(super) fn clipboard_field_input(&mut self, app: &mut dyn AppDriver, tx: &mut Tx, mut from: usize, prior_picks: usize) -> ActionQueue {
+        if prior_picks != 0 {
+            // Earlier picks run first, but their keys still belong to the next frame.
+            let reply_picks = tx.pick_reads.split_off(prior_picks);
+            let reply_input = tx.field_input.split_off(from);
+            self.run_pick_reads(app, tx);
+            from = tx.field_input.len();
+            tx.field_input.extend(reply_input);
+            tx.pick_reads = reply_picks;
         }
-        crate::clipboard::flush_memory(self);
+        self.run_pick_reads(app, tx);
+        if tx.field_input.len() == from { return ActionQueue::default(); }
+        self.latch_focus(app, tx);
+        let pending = std::mem::take(&mut self.frame.queue);
+        self.latch_field_input(tx, from);
+        std::mem::replace(&mut self.frame.queue, pending)
     }
 
     pub fn tracing(&self) -> bool { self.frame.tracing_channels() || self.scene.tracing() }
