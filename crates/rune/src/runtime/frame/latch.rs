@@ -62,7 +62,7 @@ impl RuntimeCore {
         if tx.minimize_order.take().is_some() { self.minimize_step(crate::window::MinimizeEvent::Asked); }
         self.host.titlebar.toggle_maximized |= std::mem::take(&mut tx.toggle_maximized);
         self.host.titlebar.toggle_full_screen |= std::mem::take(&mut tx.toggle_full_screen);
-        self.latch_field_input(tx);
+        self.latch_field_input(tx, 0);
         self.latch_playground(app, tx);
         for prefix in std::mem::take(&mut tx.evict_memos) { self.invalidate_memos_by_prefix(&prefix); }
         if !tx.open_urls.is_empty() { self.open_urls(std::mem::take(&mut tx.open_urls)); }
@@ -110,8 +110,8 @@ impl RuntimeCore {
         crate::clipboard::flush_memory(self);
     }
 
-    fn latch_field_input(&mut self, tx: &mut Tx) {
-        for input in tx.field_input.drain(..) {
+    fn latch_field_input(&mut self, tx: &mut Tx, from: usize) {
+        for input in tx.field_input.drain(from..) {
             match input {
                 crate::el::FieldInput::Key(ev) => self.key(ev),
                 crate::el::FieldInput::PasteText(revision, text) => self.frame.queue.push(Action::PasteText(revision, *text)),
@@ -137,10 +137,10 @@ impl RuntimeCore {
     }
 
     /// Run field input chosen by a clipboard reader before the next host event in this frame.
-    pub(super) fn clipboard_field_input(&mut self, app: &mut dyn AppDriver, tx: &mut Tx) -> ActionQueue {
+    pub(super) fn clipboard_field_input(&mut self, app: &mut dyn AppDriver, tx: &mut Tx, from: usize) -> ActionQueue {
         self.latch_focus(app, tx);
         let pending = std::mem::take(&mut self.frame.queue);
-        self.latch_field_input(tx);
+        self.latch_field_input(tx, from);
         std::mem::replace(&mut self.frame.queue, pending)
     }
 

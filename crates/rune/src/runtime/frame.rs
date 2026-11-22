@@ -308,8 +308,8 @@ impl RuntimeCore {
                 if r { why |= if input { CommitWhy::INPUT } else { CommitWhy::DIRTY }; }
             }
             self.run_pick_reads(app, &mut tx);
-            if before_read.is_some_and(|before| tx.field_input.len() > before) {
-                clipboard_input = self.clipboard_field_input(app, &mut tx).into_iter();
+            if let Some(before) = before_read && tx.field_input.len() > before {
+                clipboard_input = self.clipboard_field_input(app, &mut tx, before).into_iter();
             }
         }
         // Once a frame, however often a drag moved the selection, and in time for this commit.

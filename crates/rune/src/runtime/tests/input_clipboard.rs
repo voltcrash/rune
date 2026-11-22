@@ -281,23 +281,28 @@ fn rich_pastes_reach_paste_hooks_and_plain_fields_keep_pasting_text() {
 
 #[test]
 fn submit_after_a_clipboard_reply_sees_the_pasted_text() {
-    struct State { draft: crate::TextEdit, submitted: String }
+    struct State { draft: crate::TextEdit, submitted: Vec<String> }
     let mut draft = crate::TextEdit::new("before");
     draft.focused = true;
     draft.set_selection(0, draft.text.len());
-    let mut rt = Runtime::new(State { draft, submitted: String::new() }, |s: &State, _: &mut Cx<State>| {
+    let mut rt = Runtime::new(State { draft, submitted: Vec::new() }, |s: &State, _: &mut Cx<State>| {
         crate::text_input(&s.draft, crate::TextStyle::new(16.0, 400.0)).key("draft").size(200.0, 40.0)
             .on_edit(|s: &mut State| &mut s.draft)
-            .on_submit(|s: &mut State, tx| { s.submitted.clone_from(&s.draft.text); tx.blur(); })
+            .on_input_change(|s: &mut State, tx| {
+                if s.draft.text == "first" { tx.send_key(KeyEvent { key: crate::Key::Enter, mods: Default::default() }); }
+            })
+            .on_submit(|s: &mut State, tx| { s.submitted.push(s.draft.text.clone()); tx.blur(); })
     }, (200.0, 40.0), Env::new(true, 1.0));
     let clipboard = crate::clipboard::memory();
-    clipboard.set_content(crate::ClipboardContent::new("after"));
+    clipboard.set_content(crate::ClipboardContent::new("first"));
     rt.use_clipboard(&clipboard);
     rt.frame(0.0);
     rt.update(|_, tx| tx.read_clipboard(|_: &mut State, c, tx| tx.paste_text(c.text())));
+    clipboard.set_content(crate::ClipboardContent::new(" second"));
+    rt.update(|_, tx| tx.read_clipboard(|_: &mut State, c, tx| tx.paste_text(c.text())));
     rt.key(KeyEvent { key: crate::Key::Enter, mods: Default::default() });
     rt.frame(0.0);
-    assert_eq!(rt.state.submitted, "after");
+    assert_eq!(rt.state.submitted, ["first second"]);
 }
 
 #[test]
