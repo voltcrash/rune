@@ -13,6 +13,12 @@ mod scroll;
 #[cfg(test)]
 mod tests;
 
+#[derive(Clone, Debug)]
+pub(crate) enum FieldInput {
+    Key(crate::KeyEvent),
+    PasteText(Box<crate::ClipboardContent>),
+}
+
 /// What a handler may say about the commit it causes.
 #[derive(Clone, Debug, Default)]
 pub struct Tx {
@@ -78,7 +84,7 @@ pub struct Tx {
     /// `Tx::toggle_full_screen`.
     pub(crate) toggle_full_screen: bool,
     /// `Tx::send_key`, in order.
-    pub(crate) keys: Vec<crate::KeyEvent>,
+    pub(crate) field_input: Vec<FieldInput>,
     /// `Tx::drop_point`.
     pub(crate) drop_point: Option<PointerEvent>,
     pub(crate) title: Option<String>,
@@ -426,7 +432,7 @@ impl Tx {
     /// items send Ctrl+C (⌘C) and the rest to the field that has focus, as AppKit's standard
     /// Edit items do. Keys sent in one handler arrive in order.
     pub fn send_key(&mut self, ev: crate::KeyEvent) {
-        self.keys.push(ev);
+        self.field_input.push(FieldInput::Key(ev));
     }
 
     /// Set this window's title after this handler, in its title bar and the Window menu. The

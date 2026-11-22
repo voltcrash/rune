@@ -62,7 +62,14 @@ impl RuntimeCore {
         if tx.minimize_order.take().is_some() { self.minimize_step(crate::window::MinimizeEvent::Asked); }
         self.host.titlebar.toggle_maximized |= std::mem::take(&mut tx.toggle_maximized);
         self.host.titlebar.toggle_full_screen |= std::mem::take(&mut tx.toggle_full_screen);
-        for ev in std::mem::take(&mut tx.keys) { self.key(ev); }
+        for input in tx.field_input.drain(..) {
+            match input {
+                crate::el::FieldInput::Key(ev) => self.key(ev),
+                crate::el::FieldInput::PasteText(text) => {
+                    if let Some(path) = self.paste_target() { self.frame.queue.push(Action::PasteText(path, *text)); }
+                }
+            }
+        }
         self.latch_playground(app, tx);
         for prefix in std::mem::take(&mut tx.evict_memos) { self.invalidate_memos_by_prefix(&prefix); }
         if !tx.open_urls.is_empty() { self.open_urls(std::mem::take(&mut tx.open_urls)); }

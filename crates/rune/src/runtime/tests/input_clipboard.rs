@@ -224,6 +224,20 @@ fn rich_pastes_reach_paste_hooks_and_plain_fields_keep_pasting_text() {
     assert_eq!((rt.state.rich.text.as_str(), rt.state.changes), ("[rich]", 2), "a hook that takes it edits the field; on_input_change runs");
     assert_eq!(rt.state.hook, vec![Some("<b>Hello</b>".to_owned()); 2]);
 
+    rt.update(|s, tx| {
+        s.rich.set_selection(0, s.rich.text.len());
+        tx.paste_text("[rich]");
+    });
+    rt.frame(0.0);
+    assert_eq!(rt.state.changes, 2, "pasting the same text keeps the current edit revision");
+    rt.update(|_, tx| tx.paste_text("\nlast line"));
+    rt.frame(0.0);
+    assert_eq!((rt.state.rich.text.as_str(), rt.state.changes), ("[rich]\nlast line", 3));
+    assert_eq!(rt.state.hook.len(), 2, "an explicit insertion cannot re-enter the clipboard hook");
+    rt.key(KeyEvent { key: crate::Key::Command('z'), mods: crate::Mods { cmd: true, ..Default::default() } });
+    rt.frame(0.0);
+    assert_eq!(rt.state.rich.text, "[rich]");
+
     // HTML with no plain text: only rich hooks hear it, never a plain field or text handler.
     m.set_content(ClipboardContent::new("").with_html("<i>only</i>"));
     rt.update(|s, _| s.take = false); rt.frame(0.0);

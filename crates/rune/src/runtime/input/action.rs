@@ -52,6 +52,7 @@ pub(in crate::runtime) enum Action {
     /// The window went inactive: an open composition becomes text (`Runtime::finish_composition`).
     FinishIme,
     Paste(crate::ClipboardContent, Option<Option<String>>),
+    PasteText(String, crate::ClipboardContent),
     /// A `Tx::read_clipboard` callback's id and what the clipboard held.
     ClipboardRead(u64, crate::ClipboardContent),
     /// A `Tx::open_file` or `Tx::save_file` callback's id and the dialog's answer.
@@ -185,7 +186,7 @@ fn handler_name(action: &Action) -> &'static str {
         Action::ScreenLayout(..) => "on_screen_layout",
         Action::Files(_) => "on_drop_files",
         Action::Ime(_) | Action::FinishIme => "a text input's edit",
-        Action::Paste(..) => "on_paste",
+        Action::Paste(..) | Action::PasteText(..) => "on_paste",
         Action::ClipboardRead(..) => "a `read_clipboard` callback",
         Action::FileDialog(..) => "a file dialog callback",
         _ => "a handler",
@@ -230,7 +231,7 @@ pub(crate) fn merge(tx: &mut Tx, one: Tx) {
     tx.minimize_order = tx.minimize_order.max(one.minimize_order);
     tx.toggle_maximized |= one.toggle_maximized;
     tx.toggle_full_screen |= one.toggle_full_screen;
-    tx.keys.extend(one.keys);
+    tx.field_input.extend(one.field_input);
     if one.title.is_some() { tx.title = one.title; }
     if one.announce.is_some() { tx.announce = one.announce; }
     tx.playground.extend(one.playground);
@@ -497,6 +498,10 @@ impl RuntimeCore {
             Action::Gesture(chain, gesture) => self.run_gesture(app, chain, gesture, &mut one),
             Action::Ime(ev) => self.run_ime(app, ev, &mut one),
             Action::FinishIme => self.finish_ime(app, &mut one),
+            Action::PasteText(path, text) => {
+                if self.paste_target().as_deref() != Some(&path) { return false; }
+                self.with_focused_state(app, |state, access, _| access(state).paste(text.text()), &mut one)
+            }
             Action::Paste(content, target) => {
                 if target.is_some_and(|target| target != self.paste_target()) { return false; }
                 let hook = self.focused_input().and_then(|i| i.paste.clone());

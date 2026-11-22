@@ -77,7 +77,7 @@ pub use selection_style::SelectionStyle;
 pub(crate) use sticky::{Sticky, StickyEdge};
 pub(crate) use text_spec::{Elide, TextDir, TextDirEvent, step_text_dir};
 pub use text_spec::TextSpec;
-pub(crate) use tx::{Commit, FocusAsk, MotionSource, SelectRequest, TraceCalls};
+pub(crate) use tx::{Commit, FieldInput, FocusAsk, MotionSource, SelectRequest, TraceCalls};
 pub use tx::{Shell, Tx};
 pub(crate) use visual::VisualFlags;
 pub use visual::{Visual, VisualCold};
