@@ -442,6 +442,7 @@ impl RuntimeCore {
         for read in std::mem::take(&mut tx.pick_reads) {
             let picked = self.element_at_within(read.within.as_deref(), read.x, read.y, read.pick);
             if let Some(f) = read.take() {
+                self.update_tx_focus(tx);
                 f(app.states(), picked, tx);
                 self.commit.dirty = true;
             }

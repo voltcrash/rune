@@ -269,6 +269,12 @@ fn rich_pastes_reach_paste_hooks_and_plain_fields_keep_pasting_text() {
     assert!(rt.state.rich.focused);
     assert_eq!(rt.state.plain.text, "Hello", "a pending focus change is resolved before the old editor can receive a paste");
     assert_eq!(rt.state.rich.text, "[rich]");
+
+    rt.update(|_, tx| tx.read_clipboard(|_: &mut State, _, tx| {
+        tx.element_at(5.0, 5.0, |_: &mut State, _, tx| tx.paste_text("picked text"));
+    }));
+    rt.frame(0.0); rt.frame(0.0);
+    assert!(rt.state.rich.text.contains("picked text"), "a pick callback inside a frame sees the current editor");
 }
 
 #[test]

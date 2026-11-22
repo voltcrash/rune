@@ -7,7 +7,7 @@ impl RuntimeCore {
     pub(in crate::runtime) fn route_key(&mut self, app: &mut dyn AppDriver, ev: &KeyEvent, repeat: bool, one: &mut Tx) -> bool {
         let physical_key = one.physical_key;
         one.by_keys = true;
-        one.focused = self.focused_key();
+        self.update_tx_focus(one);
         if matches!(ev.key, crate::Key::Modifier { .. }) { return !repeat && self.route_modifier(app, ev, one); }
         // Any other key while Ctrl and Shift are down makes them a shortcut, not a direction.
         self.kbd.disarm_direction_chord();

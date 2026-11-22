@@ -313,7 +313,7 @@ impl RuntimeCore {
     /// focus on the press (and its ancestors) hears the release first.
     pub(in crate::runtime) fn route_key_up(&mut self, app: &mut dyn AppDriver, ev: &KeyEvent, tx: &mut Tx) -> bool {
         if self.eat_ime_key_up(app) { return false; }
-        tx.focused = self.focused_key();
+        self.update_tx_focus(tx);
         let pressed = self.kbd.route_key_release().and_then(|p| self.live_index(&p));
         let focused = self.kbd.focus.path().and_then(|p| self.live_index(p));
         let secure = [pressed, focused].into_iter().flatten()
