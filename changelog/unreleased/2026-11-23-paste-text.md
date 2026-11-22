@@ -1,1 +1,1 @@
-- `Tx::paste_text` inserts plain text into the focused editor with normal undo, caret scrolling and change notifications.
+- `Tx::paste_text` inserts plain text into the focused editor with normal undo, caret scrolling and change notifications. A clipboard reader’s insertion reaches the editor before a subsequent submit key in the same frame.
