@@ -16,7 +16,7 @@ mod tests;
 #[derive(Clone, Debug)]
 pub(crate) enum FieldInput {
     Key(crate::KeyEvent),
-    PasteText(Box<crate::ClipboardContent>),
+    PasteText(u64, Box<crate::ClipboardContent>),
 }
 
 /// What a handler may say about the commit it causes.
@@ -35,6 +35,7 @@ pub struct Tx {
     pub(crate) physical_key: Option<crate::PhysicalKeyCode>,
     pub(crate) key_base: Option<char>,
     pub(crate) focused: Option<String>,
+    pub(crate) focus_revision: u64,
     /// What this change does with motion ([`Tx::instant`], [`Tx::animated`], [`Tx::settle`]).
     pub(crate) commit: Commit,
     /// The motion this change's layout moves on ([`Tx::motion`], [`Tx::motion_curve`]).

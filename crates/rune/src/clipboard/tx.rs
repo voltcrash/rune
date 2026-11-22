@@ -55,8 +55,8 @@ impl Tx {
     /// It uses the field's normal change and caret handling and does not call its paste hook.
     pub fn paste_text(&mut self, text: impl Into<String>) {
         let text = text.into();
-        if !text.is_empty() {
-            self.field_input.push(crate::el::FieldInput::PasteText(Box::new(crate::ClipboardContent::new(text))));
+        if self.focused.is_some() && !text.is_empty() {
+            self.field_input.push(crate::el::FieldInput::PasteText(self.focus_revision, Box::new(crate::ClipboardContent::new(text))));
         }
     }
 

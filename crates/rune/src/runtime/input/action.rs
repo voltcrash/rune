@@ -52,7 +52,7 @@ pub(in crate::runtime) enum Action {
     /// The window went inactive: an open composition becomes text (`Runtime::finish_composition`).
     FinishIme,
     Paste(crate::ClipboardContent, Option<Option<String>>),
-    PasteText(String, crate::ClipboardContent),
+    PasteText(u64, crate::ClipboardContent),
     /// A `Tx::read_clipboard` callback's id and what the clipboard held.
     ClipboardRead(u64, crate::ClipboardContent),
     /// A `Tx::open_file` or `Tx::save_file` callback's id and the dialog's answer.
@@ -498,8 +498,8 @@ impl RuntimeCore {
             Action::Gesture(chain, gesture) => self.run_gesture(app, chain, gesture, &mut one),
             Action::Ime(ev) => self.run_ime(app, ev, &mut one),
             Action::FinishIme => self.finish_ime(app, &mut one),
-            Action::PasteText(path, text) => {
-                if self.paste_target().as_deref() != Some(&path) { return false; }
+            Action::PasteText(revision, text) => {
+                if self.kbd.focus.revision != revision { return false; }
                 self.with_focused_state(app, |state, access, _| access(state).paste(text.text()), &mut one)
             }
             Action::Paste(content, target) => {

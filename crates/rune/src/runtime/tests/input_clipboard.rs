@@ -255,6 +255,20 @@ fn rich_pastes_reach_paste_hooks_and_plain_fields_keep_pasting_text() {
     plain_root.update(|_, tx| tx.request_paste());
     plain_root.frame(0.0);
     assert!(plain_root.state.is_empty(), "an HTML-only clipboard never triggers a plain root on_paste");
+
+    m.set_content(ClipboardContent::new("private field text"));
+    rt.update(|_, tx| tx.read_clipboard(|_: &mut State, c, tx| tx.paste_text(c.text())));
+    let plain = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("plain")).unwrap().path.clone();
+    rt.frame.queue.push(Action::Focus(plain, 5.0, 5.0));
+    rt.frame(0.0); rt.frame(0.0);
+    assert_eq!(rt.state.plain.text, "Hello", "a click later in the clipboard callback's frame cannot retarget its paste");
+
+    rt.update(|_, tx| tx.focus("rich", true));
+    rt.update(|_, tx| tx.paste_text("private field text"));
+    rt.frame(0.0);
+    assert!(rt.state.rich.focused);
+    assert_eq!(rt.state.plain.text, "Hello", "a pending focus change is resolved before the old editor can receive a paste");
+    assert_eq!(rt.state.rich.text, "[rich]");
 }
 
 #[test]
