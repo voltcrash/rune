@@ -227,7 +227,9 @@ impl RuntimeCore {
         #[cfg(debug_assertions)]
         let mut ran_other = ran;
         let mut pointer_hover = false;
-        for Queued { action, at, input } in queue {
+        let mut host_input = queue.into_iter();
+        let mut clipboard_input = ActionQueue::default().into_iter();
+        while let Some(Queued { action, at, input }) = clipboard_input.next().or_else(|| host_input.next()) {
             if matches!(action, Action::Key { stage: false, .. } | Action::Physical(crate::PhysicalInput::Key { pressed: true, .. }, _)) { crate::marks::input_handled(true); }
             pointer_hover |= matches!(action, Action::Hover(_));
             // The user's own key or press takes over from a `Tx::focus_when_shown` still waiting.
@@ -293,6 +295,7 @@ impl RuntimeCore {
                 let from_change = std::mem::take(&mut tx.select_from_change);
                 self.apply_select_request(app, request, from_change);
             }
+            let before_read = matches!(action, Action::ClipboardRead(..)).then(|| tx.field_input.len());
             if matches!(action, Action::Layout(..) | Action::ScreenLayout(..) | Action::DrawnLayout(_, _, false) | Action::VisibleRows(..)) {
                 ran_layout |= self.run_action(app, action, &mut tx);
             } else {
@@ -305,6 +308,9 @@ impl RuntimeCore {
                 if r { why |= if input { CommitWhy::INPUT } else { CommitWhy::DIRTY }; }
             }
             self.run_pick_reads(app, &mut tx);
+            if before_read.is_some_and(|before| tx.field_input.len() > before) {
+                clipboard_input = self.clipboard_field_input(app, &mut tx).into_iter();
+            }
         }
         // Once a frame, however often a drag moved the selection, and in time for this commit.
         for action in self.selection_changes(app) {
