@@ -297,6 +297,13 @@ fn submit_after_a_clipboard_reply_sees_the_pasted_text() {
     clipboard.set_content(crate::ClipboardContent::new("first"));
     rt.use_clipboard(&clipboard);
     rt.frame(0.0);
+    rt.poll = Some(|_: &mut State, _, tx| {
+        tx.element_at(5.0, 5.0, |_: &mut State, _, tx| {
+            tx.send_key(KeyEvent { key: crate::Key::Enter, mods: Default::default() });
+        });
+        false
+    });
+    rt.update(|_, tx| tx.read_clipboard(|_: &mut State, _, _| {}));
     rt.update(|_, tx| tx.read_clipboard(|_: &mut State, c, tx| tx.paste_text(c.text())));
     clipboard.set_content(crate::ClipboardContent::new(" second"));
     rt.update(|_, tx| tx.read_clipboard(|_: &mut State, c, tx| tx.paste_text(c.text())));

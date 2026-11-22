@@ -295,7 +295,7 @@ impl RuntimeCore {
                 let from_change = std::mem::take(&mut tx.select_from_change);
                 self.apply_select_request(app, request, from_change);
             }
-            let before_read = matches!(action, Action::ClipboardRead(..)).then(|| tx.field_input.len());
+            let before_read = matches!(action, Action::ClipboardRead(..)).then(|| (tx.field_input.len(), tx.pick_reads.len()));
             if matches!(action, Action::Layout(..) | Action::ScreenLayout(..) | Action::DrawnLayout(_, _, false) | Action::VisibleRows(..)) {
                 ran_layout |= self.run_action(app, action, &mut tx);
             } else {
@@ -307,9 +307,10 @@ impl RuntimeCore {
                 ran |= r;
                 if r { why |= if input { CommitWhy::INPUT } else { CommitWhy::DIRTY }; }
             }
-            self.run_pick_reads(app, &mut tx);
-            if let Some(before) = before_read && tx.field_input.len() > before {
-                clipboard_input = self.clipboard_field_input(app, &mut tx, before).into_iter();
+            if let Some((input, picks)) = before_read {
+                clipboard_input = self.clipboard_field_input(app, &mut tx, input, picks).into_iter();
+            } else {
+                self.run_pick_reads(app, &mut tx);
             }
         }
         // Once a frame, however often a drag moved the selection, and in time for this commit.

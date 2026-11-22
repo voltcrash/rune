@@ -137,7 +137,18 @@ impl RuntimeCore {
     }
 
     /// Run field input chosen by a clipboard reader before the next host event in this frame.
-    pub(super) fn clipboard_field_input(&mut self, app: &mut dyn AppDriver, tx: &mut Tx, from: usize) -> ActionQueue {
+    pub(super) fn clipboard_field_input(&mut self, app: &mut dyn AppDriver, tx: &mut Tx, mut from: usize, prior_picks: usize) -> ActionQueue {
+        if prior_picks != 0 {
+            // Earlier picks run first, but their keys still belong to the next frame.
+            let reply_picks = tx.pick_reads.split_off(prior_picks);
+            let reply_input = tx.field_input.split_off(from);
+            self.run_pick_reads(app, tx);
+            from = tx.field_input.len();
+            tx.field_input.extend(reply_input);
+            tx.pick_reads = reply_picks;
+        }
+        self.run_pick_reads(app, tx);
+        if tx.field_input.len() == from { return ActionQueue::default(); }
         self.latch_focus(app, tx);
         let pending = std::mem::take(&mut self.frame.queue);
         self.latch_field_input(tx, from);
