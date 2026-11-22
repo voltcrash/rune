@@ -62,7 +62,12 @@ impl RuntimeCore {
         if tx.minimize_order.take().is_some() { self.minimize_step(crate::window::MinimizeEvent::Asked); }
         self.host.titlebar.toggle_maximized |= std::mem::take(&mut tx.toggle_maximized);
         self.host.titlebar.toggle_full_screen |= std::mem::take(&mut tx.toggle_full_screen);
-        for ev in std::mem::take(&mut tx.keys) { self.key(ev); }
+        for input in tx.field_input.drain(..) {
+            match input {
+                crate::el::FieldInput::Key(ev) => self.key(ev),
+                crate::el::FieldInput::PasteText(revision, text) => self.frame.queue.push(Action::PasteText(revision, *text)),
+            }
+        }
         self.latch_playground(app, tx);
         for prefix in std::mem::take(&mut tx.evict_memos) { self.invalidate_memos_by_prefix(&prefix); }
         if !tx.open_urls.is_empty() { self.open_urls(std::mem::take(&mut tx.open_urls)); }
@@ -126,8 +131,16 @@ impl RuntimeCore {
     pub fn tracing(&self) -> bool { self.frame.tracing_channels() || self.scene.tracing() }
 
     pub(in crate::runtime) fn transaction(&self, app: &dyn ViewDriver) -> Tx {
-        Tx { trace: self.tracing().then(crate::el::TraceCalls::default), mods: self.kbd.held_mods, selection: self.selection_snapshot(app),
-            input_time: crate::input::time::current(), clock: self.clock, focus_visible: self.kbd.focus.keyboard(), focused: self.focused_key(), assistive: self.host.a11y.is_some() || cfg!(target_arch = "wasm32"), ..Tx::default() }
+        let mut tx = Tx { trace: self.tracing().then(crate::el::TraceCalls::default), mods: self.kbd.held_mods, selection: self.selection_snapshot(app),
+            input_time: crate::input::time::current(), clock: self.clock, assistive: self.host.a11y.is_some() || cfg!(target_arch = "wasm32"), ..Tx::default() };
+        self.update_tx_focus(&mut tx);
+        tx
+    }
+
+    pub(in crate::runtime) fn update_tx_focus(&self, tx: &mut Tx) {
+        tx.focused = self.focused_key();
+        tx.focus_revision = self.kbd.focus.revision;
+        tx.focus_visible = self.kbd.focus.keyboard();
     }
 
     /// A scalar from the actual draw path (e.g. `shell.width`). Values hold until resampled.

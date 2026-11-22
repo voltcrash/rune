@@ -129,7 +129,7 @@ impl RuntimeCore {
     /// (a handler that asked for the clipboard, a link, focus or a selection).
     pub(crate) fn web_edit_context(&mut self, app: &mut dyn AppDriver, mirror: &mut Mirror) -> Option<bool> {
         let tx = &self.frame.pending;
-        if self.web_release_needs_frame() || self.kbd.focus_request.is_some() || tx.blur || tx.focus_to.is_some() || tx.select.is_some() || !tx.keys.is_empty()
+        if self.web_release_needs_frame() || self.kbd.focus_request.is_some() || tx.blur || tx.focus_to.is_some() || tx.select.is_some() || !tx.field_input.is_empty()
             || tx.copy.is_some() || tx.paste || !tx.clipboard_reads.is_empty() || !tx.pick_reads.is_empty()
             || !tx.open_urls.is_empty() || !tx.file_dialogs.is_empty() || !tx.popups.is_empty() || tx.clear_secret {
             return None;

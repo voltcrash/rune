@@ -81,6 +81,7 @@ pub(crate) enum FocusEffect {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct FocusState {
     pub(crate) focus: Focus,
+    pub(in crate::runtime) revision: u64,
     pub(crate) modality: Modality,
     pub(crate) entry: Entry,
     /// Per landmark (by path), the element focused last inside it, most recent first: where F6
@@ -160,7 +161,7 @@ impl FocusState {
                     (Focus::On { path: old, from, .. }, None) => Focus::None { from: from.or_else(|| Some(old.clone())), blurred: Some(old), handoff: true },
                     (none @ Focus::None { .. }, None) => none,
                 };
-                if moved { Effects::one(FocusEffect::Moved) } else { Effects::none() }
+                if moved { self.revision = self.revision.wrapping_add(1); Effects::one(FocusEffect::Moved) } else { Effects::none() }
             }
             FocusEvent::Hover(lit) => {
                 if let Focus::On { hovered, .. } = &mut self.focus { *hovered = lit; }

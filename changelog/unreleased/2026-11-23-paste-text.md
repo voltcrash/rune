@@ -1,0 +1,1 @@
+- `Tx::paste_text` inserts plain text into the focused editor with normal undo, caret scrolling and change notifications.

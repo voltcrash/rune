@@ -50,6 +50,16 @@ impl Tx {
         self.clear_secret = true;
     }
 
+    /// Paste supplied plain text over the focused editor's selection as one undo step. A
+    /// clipboard handler can use this after choosing the text from several available forms.
+    /// It uses the field's normal change and caret handling and does not call its paste hook.
+    pub fn paste_text(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        if self.focused.is_some() && !text.is_empty() {
+            self.field_input.push(crate::el::FieldInput::PasteText(self.focus_revision, Box::new(crate::ClipboardContent::new(text))));
+        }
+    }
+
     /// Read the OS clipboard asynchronously and paste into the focused field or root `on_paste`.
     pub fn request_paste(&mut self) { self.paste = true; }
 

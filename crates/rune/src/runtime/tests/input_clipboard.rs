@@ -224,6 +224,20 @@ fn rich_pastes_reach_paste_hooks_and_plain_fields_keep_pasting_text() {
     assert_eq!((rt.state.rich.text.as_str(), rt.state.changes), ("[rich]", 2), "a hook that takes it edits the field; on_input_change runs");
     assert_eq!(rt.state.hook, vec![Some("<b>Hello</b>".to_owned()); 2]);
 
+    rt.update(|s, tx| {
+        s.rich.set_selection(0, s.rich.text.len());
+        tx.paste_text("[rich]");
+    });
+    rt.frame(0.0);
+    assert_eq!(rt.state.changes, 2, "pasting the same text keeps the current edit revision");
+    rt.update(|_, tx| tx.paste_text("\nlast line"));
+    rt.frame(0.0);
+    assert_eq!((rt.state.rich.text.as_str(), rt.state.changes), ("[rich]\nlast line", 3));
+    assert_eq!(rt.state.hook.len(), 2, "an explicit insertion cannot re-enter the clipboard hook");
+    rt.key(KeyEvent { key: crate::Key::Command('z'), mods: crate::Mods { cmd: true, ..Default::default() } });
+    rt.frame(0.0);
+    assert_eq!(rt.state.rich.text, "[rich]");
+
     // HTML with no plain text: only rich hooks hear it, never a plain field or text handler.
     m.set_content(ClipboardContent::new("").with_html("<i>only</i>"));
     rt.update(|s, _| s.take = false); rt.frame(0.0);
@@ -241,6 +255,26 @@ fn rich_pastes_reach_paste_hooks_and_plain_fields_keep_pasting_text() {
     plain_root.update(|_, tx| tx.request_paste());
     plain_root.frame(0.0);
     assert!(plain_root.state.is_empty(), "an HTML-only clipboard never triggers a plain root on_paste");
+
+    m.set_content(ClipboardContent::new("private field text"));
+    rt.update(|_, tx| tx.read_clipboard(|_: &mut State, c, tx| tx.paste_text(c.text())));
+    let plain = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("plain")).unwrap().path.clone();
+    rt.frame.queue.push(Action::Focus(plain, 5.0, 5.0));
+    rt.frame(0.0); rt.frame(0.0);
+    assert_eq!(rt.state.plain.text, "Hello", "a click later in the clipboard callback's frame cannot retarget its paste");
+
+    rt.update(|_, tx| tx.focus("rich", true));
+    rt.update(|_, tx| tx.paste_text("private field text"));
+    rt.frame(0.0);
+    assert!(rt.state.rich.focused);
+    assert_eq!(rt.state.plain.text, "Hello", "a pending focus change is resolved before the old editor can receive a paste");
+    assert_eq!(rt.state.rich.text, "[rich]");
+
+    rt.update(|_, tx| tx.read_clipboard(|_: &mut State, _, tx| {
+        tx.element_at(5.0, 5.0, |_: &mut State, _, tx| tx.paste_text("picked text"));
+    }));
+    rt.frame(0.0); rt.frame(0.0);
+    assert!(rt.state.rich.text.contains("picked text"), "a pick callback inside a frame sees the current editor");
 }
 
 #[test]
