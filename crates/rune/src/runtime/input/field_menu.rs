@@ -132,8 +132,7 @@ impl RuntimeCore {
                     "copy" => 'c',
                     _ => 'a',
                 });
-                let layout = self.focused_layout();
-                self.with_focused(app, |e| e.key_in(&ev, layout.as_ref().map(TextLayout::view)), one);
+                self.field_edit_key(app, &ev, one, false);
             }
             "paste" => one.request_paste(),
             "learn-spelling" => {

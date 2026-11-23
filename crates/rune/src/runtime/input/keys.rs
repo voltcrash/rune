@@ -65,24 +65,7 @@ impl RuntimeCore {
             _ if ev.is_window_menu_chord() => false,
             _ => !ev.is_command_chord() || ev.control_binding().is_some(),
         };
-        if input_handles {
-            let layout = self.focused_layout();
-            // A rich field copies its selection's formatting too, read before a cut removes it.
-            let mut html = None;
-            let copies = matches!(ev.edit_command(), Some('c' | 'x'));
-            let handled = self.with_focused(app, |e| {
-                if copies && e.is_rich() && !e.is_secure() {
-                    html = Some(e.selected_html()).filter(|h| !h.is_empty());
-                }
-                e.key_in(ev, layout.as_ref().map(TextLayout::view))
-            }, one);
-            if let Some(html) = html
-                && let Some(text) = one.copy.as_ref().filter(|w| !w.is_secret()).map(|w| w.content().text().to_owned())
-            {
-                one.copy_rich(crate::ClipboardContent::new(text).with_html(html));
-            }
-            if handled { return true; }
-        }
+        if input_handles && self.field_edit_key(app, ev, one, true) { return true; }
         one.physical_key = physical_key;
         if !app_first && !app.playground_typing() && app.has_on_key() && Tx::took(app.on_key(ev, one), one) {
             log_event!(self, "key {:?}", ev.key);
@@ -174,6 +157,32 @@ impl RuntimeCore {
         st.moved();
         st.land(stick);
         true
+    }
+
+    pub(in crate::runtime) fn field_edit_key(&mut self, app: &mut dyn AppDriver, ev: &KeyEvent, tx: &mut Tx, rich_copy: bool) -> bool {
+        let layout = self.focused_layout();
+        let copies = matches!(ev.edit_command(), Some('c' | 'x'));
+        let format = if copies { self.focused_input().and_then(|i| i.copy_text.clone()) } else { None };
+        let mut html = None;
+        let handled = self.with_focused(app, |e| {
+            let text = format.as_ref().and_then(|f| {
+                if e.is_secure() { return None; }
+                e.sync_invariants();
+                if e.anchor == e.focus { None } else { f(e) }
+            });
+            if rich_copy && copies && text.is_none() && !e.is_secure() && e.is_rich() {
+                html = Some(e.selected_html()).filter(|h| !h.is_empty());
+            }
+            let mut out = e.key_in(ev, layout.as_ref().map(TextLayout::view));
+            if out.copy.is_some() && let Some(text) = text { out.copy = Some(text); }
+            out
+        }, tx);
+        if let Some(html) = html
+            && let Some(text) = tx.copy.as_ref().filter(|w| !w.is_secret()).map(|w| w.content().text().to_owned())
+        {
+            tx.copy_rich(crate::ClipboardContent::new(text).with_html(html));
+        }
+        handled
     }
 
     pub(in crate::runtime) fn focused_layout(&mut self) -> Option<TextLayout> {

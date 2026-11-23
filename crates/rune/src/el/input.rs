@@ -2,6 +2,8 @@
 
 use super::*;
 
+type InputCopyTextFn = Rc<dyn Fn(&TextEdit) -> Option<String>>;
+
 /// A text field bound to a [`TextEdit`] in app state.
 #[derive(Clone)]
 pub struct InputSpec {
@@ -31,6 +33,7 @@ pub struct InputSpec {
     pub(crate) key: Option<InputKeyFn>,
     pub(crate) change: Option<PressFn>,
     pub(crate) paste: Option<InputPasteFn>,
+    pub(crate) copy_text: Option<InputCopyTextFn>,
     /// `El::spellcheck`: the platform's checker marks misspelled words.
     pub(crate) spellcheck: bool,
     /// [`El::selection_style`]: the selection's highlight and ink, by window focus, over `selection`.
@@ -93,6 +96,7 @@ pub fn text_input(edit: &TextEdit, style: TextStyle) -> El {
         key: None,
         change: None,
         paste: None,
+        copy_text: None,
         spellcheck: false,
         selection_style: None,
     }));
@@ -211,6 +215,15 @@ impl El {
     pub fn on_input_paste<S: 'static>(mut self, f: impl Fn(&mut S, &crate::ClipboardContent, &mut Tx) -> bool + 'static) -> Self {
         if let Some(input) = self.cold.get_mut_if_some().and_then(|c| c.input.as_deref_mut()) {
             input.paste = Some(Rc::new(move |s, content, tx| f(downcast::<S>(s), content, tx)));
+        }
+        self
+    }
+    /// Supplies plain clipboard text for a selection, for example a file mention's full path.
+    /// Returning `None` keeps the ordinary copy, including rich formatting. Runs before a cut.
+    /// Secure fields and empty selections skip the callback.
+    pub fn input_copy_text(mut self, f: impl Fn(&TextEdit) -> Option<String> + 'static) -> Self {
+        if let Some(input) = self.cold.get_mut_if_some().and_then(|c| c.input.as_deref_mut()) {
+            input.copy_text = Some(Rc::new(f));
         }
         self
     }
