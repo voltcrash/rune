@@ -345,8 +345,18 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
         if (!isSecondaryPress(event) || event.pointerType === 'touch' || event.target !== canvas) return;
         if (armMenu(h, event.clientX, event.clientY, event.shiftKey)) send({ kind: 'secondary_browser' });
     };
-    if (MAC) listen(canvas, 'pointerdown', armAt);
-    else listen(window, 'pointerup', armAt, { capture: true });
+    if (MAC) {
+        listen(canvas, 'pointerdown', armAt);
+        listen(canvas, 'pointermove', event => {
+            // Pointer Events report a button change during another button's hold as a move.
+            if ((event.button === 0 && (event.buttons & 1)) || (event.button === 2 && (event.buttons & 2))) armAt(event);
+        });
+    } else {
+        listen(window, 'pointerup', armAt, { capture: true });
+        listen(window, 'pointermove', event => {
+            if (event.button === 2 && !(event.buttons & 2)) armAt(event);
+        }, { capture: true });
+    }
     listen(document, 'contextmenu', event => {
         if (h.menu === 'rune' || event.target === canvas) event.preventDefault();
         if (h.menu === 'rune') h.menu = '';
@@ -640,7 +650,8 @@ function armMenu(h, x, y, browser) {
     disarmMenu(h);
     const claim = h.secondary === 'app' && browser ? 'text' : h.secondary;
     h.secondary = '';
-    if (claim === 'canvas' || claim === 'app') { h.menu = 'rune'; return false; }
+    if (claim === 'canvas') { h.menu = ''; return false; }
+    if (claim === 'app') { h.menu = 'rune'; return false; }
     h.menu = 'browser';
     if (claim === 'field' && h.key) {
         // The page's field holds the Rune field's text and selection: its menu's Cut, Copy, Paste
