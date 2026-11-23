@@ -86,7 +86,7 @@ impl<S: 'static> Runtime<S> {
     pub(crate) fn secondary_claim(&self, physical: bool) -> &'static str { self.core().secondary_claim(physical) }
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline(always)]
-    pub(crate) fn secondary_abandon(&mut self) { self.core_mut().secondary_abandon(); }
+    pub(crate) fn secondary_abandon(&mut self, physical: bool) { self.core_mut().secondary_abandon(physical); }
     #[inline(always)]
     pub fn secondary_up(&mut self, x: f32, y: f32) {
         let (core, app) = self.split_mut();

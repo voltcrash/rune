@@ -343,7 +343,7 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
     const isSecondaryPress = event => event.button === 2 || (MAC && event.button === 0 && event.ctrlKey);
     const armAt = event => {
         if (!isSecondaryPress(event) || event.pointerType === 'touch' || event.target !== canvas) return;
-        if (armMenu(h, event.clientX, event.clientY, event.shiftKey)) send({ kind: 'secondary_browser' });
+        if (armMenu(h, event.clientX, event.clientY, event.shiftKey)) send({ kind: 'secondary_browser', physical: event.button === 2 });
     };
     if (MAC) {
         listen(canvas, 'pointerdown', armAt);
@@ -358,11 +358,11 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
         }, { capture: true });
     }
     listen(document, 'contextmenu', event => {
-        if (h.menu === 'rune' || event.target === canvas) event.preventDefault();
-        if (h.menu === 'rune') h.menu = '';
+        if (event.target === canvas || (h.runeContext && ownsTarget(event.target))) event.preventDefault();
+        h.runeContext = false;
     }, { capture: true });
     for (const name of ['pointerdown', 'keydown', 'wheel']) {
-        listen(window, name, event => { if (name !== 'pointerdown' || !isSecondaryPress(event)) disarmMenu(h); }, { capture: true, passive: true });
+        listen(window, name, event => { if (name !== 'pointerdown' || event.target !== canvas || !isSecondaryPress(event)) disarmMenu(h); }, { capture: true, passive: true });
     }
     queueMicrotask(() => {
         if (!h.disposed && !embedded && !page && document.activeElement === document.body) canvas.focus({ preventScroll: true });
@@ -650,9 +650,8 @@ function armMenu(h, x, y, browser) {
     disarmMenu(h);
     const claim = h.secondary === 'app' && browser ? 'text' : h.secondary;
     h.secondary = '';
-    if (claim === 'canvas') { h.menu = ''; return false; }
-    if (claim === 'app') { h.menu = 'rune'; return false; }
-    h.menu = 'browser';
+    if (claim === 'canvas') return false;
+    if (claim === 'app') { h.runeContext = true; return false; }
     if (claim === 'field' && h.key) {
         // The page's field holds the Rune field's text and selection: its menu's Cut, Copy, Paste
         // and Select all edit them, as a page's text field's would.
@@ -714,7 +713,7 @@ function disarmMenu(h) {
         if (h.caret) placeField(h.field, h.caret);
         else Object.assign(h.field.style, { left: '0px', top: '0px', width: '1px', height: '1px', pointerEvents: 'none' });
     }
-    if (h.menu === 'browser') h.menu = '';
+    h.runeContext = false;
 }
 
 function webLink(url) {

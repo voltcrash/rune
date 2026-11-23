@@ -31,10 +31,16 @@ fn secondary_canvas_release_outside_without_motion_does_not_click() {
 fn secondary_canvas_relinquishes_a_gesture_to_the_host_menu() {
     let mut rt = secondary_canvas();
     rt.secondary_down(10., 10.);
-    rt.secondary_abandon();
+    rt.secondary_abandon(true);
     rt.secondary_up(10., 10.);
     rt.frame(0.);
     assert_eq!(rt.state, ["down", "cancel"]);
+    rt.state.clear();
+    rt.secondary_down(10., 10.);
+    rt.secondary_abandon(false);
+    rt.secondary_up(10., 10.);
+    rt.frame(0.);
+    assert_eq!(rt.state, ["down", "up", "click"]);
 }
 
 #[test]

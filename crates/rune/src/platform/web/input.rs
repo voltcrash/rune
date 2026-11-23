@@ -367,7 +367,7 @@ impl Running {
                 if self.app.resolve_popup(event["id"].as_str()).is_err() { self.app.resolve_popup(None).ok(); }
             }
             // The browser's menu takes this right-click (bridge.js): its release opens none of Rune's.
-            Some("secondary_browser") => { self.app.rt_mut().secondary_abandon(); return false; }
+            Some("secondary_browser") => { self.app.rt_mut().secondary_abandon(event["physical"].as_bool() == Some(true)); return false; }
             // The scroll throttle's last word: the mirror where the scroll stopped.
             Some("a11y_due") => {
                 self.input.a11y_first = First::Built;

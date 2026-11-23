@@ -150,9 +150,9 @@ impl RuntimeCore {
     /// The secondary press went to the browser's own menu: its release opens none of Rune's.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline]
-    pub(crate) fn secondary_abandon(&mut self) {
+    pub(crate) fn secondary_abandon(&mut self, physical: bool) {
         self.pointer.abandon_secondary();
-        if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
+        if physical && self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
             if !self.cancel_drag() { self.drop_press(); }
             self.pointer.release_tint(crate::PointerButton::Secondary);
         }
