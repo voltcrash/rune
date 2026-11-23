@@ -12,7 +12,7 @@ struct Transfer {
 #[derive(Default)]
 pub(super) struct Transfers {
 	entries: HashMap<(Window, Atom), Transfer>,
-	alarm_pending: bool,
+	alarm: Option<Arc<AtomicBool>>,
 }
 
 const TRANSFER_IDLE: Duration = Duration::from_secs(5);
@@ -88,13 +88,15 @@ impl Transfers {
 	}
 
 	fn arm(&mut self, ctx: &Inner) -> Result<()> {
-		if self.alarm_pending {
+		if self.alarm.is_some() {
 			return Ok(());
 		}
 		let Some(deadline) = self.entries.values().map(|entry| entry.deadline).min() else {
 			return Ok(());
 		};
 		let conn = Arc::downgrade(&ctx.server.conn);
+		let fired = Arc::new(AtomicBool::new(false));
+		let wake_ready = fired.clone();
 		let window = ctx.server.win_id;
 		let atom = ctx.atoms.ARBOARD_INCR_TIMEOUT;
 		// Wake wait_for_event even if a still-mounted requestor stops reading.
@@ -103,18 +105,30 @@ impl Transfers {
 			.spawn(move || {
 				std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
 				if let Some(conn) = conn.upgrade() {
+					wake_ready.store(true, Ordering::Release);
 					let wake = ClientMessageEvent::new(32, window, atom, [0; 5]);
 					let _ = conn.send_event(false, window, EventMask::NO_EVENT, wake);
 					let _ = conn.flush();
 				}
 			})
 			.map_err(into_unknown)?;
-		self.alarm_pending = true;
+		self.alarm = Some(fired);
 		Ok(())
 	}
 
+	fn take_fired_alarm(&mut self) -> bool {
+		if self.alarm.as_ref().is_some_and(|fired| fired.load(Ordering::Acquire)) {
+			self.alarm = None;
+			true
+		} else {
+			false
+		}
+	}
+
 	pub(super) fn expire(&mut self, ctx: &Inner) -> Result<()> {
-		self.alarm_pending = false;
+		if !self.take_fired_alarm() {
+			return Ok(());
+		}
 		let now = Instant::now();
 		let mut expired = Vec::new();
 		self.entries.retain(|&(window, _), entry| {
@@ -129,8 +143,13 @@ impl Transfers {
 		for window in expired {
 			self.unsubscribe_unused(ctx, window)?;
 		}
-		ctx.server.conn.flush().map_err(into_unknown)?;
-		self.arm(ctx)
+		if let Err(error) = self.arm(ctx) {
+			warn!("Could not rearm incremental clipboard transfers: {error}");
+			while let Some(request) = self.entries.values().next().map(|entry| entry.request) {
+				self.cancel(ctx, &request)?;
+			}
+		}
+		ctx.server.conn.flush().map_err(into_unknown)
 	}
 
 	fn unsubscribe_unused(&self, ctx: &Inner, window: Window) -> Result<()> {
@@ -181,5 +200,25 @@ impl Transfers {
 
 	pub(super) fn forget_window(&mut self, window: Window) {
 		self.entries.retain(|(requestor, _), _| *requestor != window);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn only_the_current_fired_alarm_can_rearm_the_transfer_timer() {
+		let first = Arc::new(AtomicBool::new(false));
+		let mut transfers = Transfers { alarm: Some(first.clone()), ..Transfers::default() };
+		assert!(!transfers.take_fired_alarm());
+		first.store(true, Ordering::Release);
+		assert!(transfers.take_fired_alarm());
+		assert!(!transfers.take_fired_alarm());
+		let next = Arc::new(AtomicBool::new(false));
+		transfers.alarm = Some(next.clone());
+		assert!(!transfers.take_fired_alarm());
+		next.store(true, Ordering::Release);
+		assert!(transfers.take_fired_alarm());
 	}
 }
