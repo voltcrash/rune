@@ -228,19 +228,14 @@ impl RuntimeCore {
             .find(|(_, r)| contains(*r, x, y)).map(|(k, _)| k)
     }
 
-    pub(in crate::runtime) fn start_link_selection(&mut self, i: usize, x: f32, y: f32) -> bool {
-        let Some(k) = self.link_at(i, x, y) else { return false };
-        self.edit.selectable.presses.clear();
-        if self.tree.nodes[i].text.as_ref().is_some_and(|t| t.cold.links[k].copy_text.is_some())
-            && let Some(at) = self.text_index_at(i, x, y) {
-            self.select_step(selectable::phase::Event::Press {
-                path: self.tree.nodes[i].path.clone(), content: self.content_of(i).to_owned(),
-                unit: selectable::Unit::Char, origin: (at, at),
-            });
-        } else {
-            self.clear_text_selection();
+    /// Link presses break the paragraph's click sequence. A copyable link can anchor or extend a drag.
+    pub(in crate::runtime) fn selection_clicks(&mut self, i: usize, x: f32, y: f32) -> Option<u32> {
+        if let Some(k) = self.link_at(i, x, y) {
+            self.edit.selectable.presses.clear();
+            return self.tree.nodes[i].text.as_ref()?.cold.links[k].copy_text.as_ref().map(|_| 1);
         }
-        true
+        let now = self.now_clock();
+        Some(self.edit.selectable.presses.press(&self.tree.nodes[i].path, now, (x, y), self.double_click_interval).min(3))
     }
 
     /// The id of the `Mark::Pill` in text field `i` under window point `(x, y)`, if any.

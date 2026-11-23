@@ -147,6 +147,16 @@ fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
     rt.pointer_up(edge + 1., cy);
     rt.frame(0.);
     assert!(rt.selected_text().is_none(), "clicking a link does not begin a text double-click");
+    rt.update(|_, tx| tx.select_text("reply/b0", 0..1));
+    rt.frame(0.);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods { shift: true, ..Mods::default() }));
+    rt.pointer_down(mid - 1., cy);
+    rt.pointer_move(mid + 1., cy);
+    rt.pointer_up(mid + 1., cy);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.frame(0.);
+    assert_eq!(rt.selected_text().as_deref(), Some("main.rs i"), "Shift-drag extends the original anchor");
+    assert_eq!(rt.state.opened, 2);
 }
 
 #[test]
