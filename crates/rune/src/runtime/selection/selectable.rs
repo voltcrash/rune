@@ -537,7 +537,7 @@ impl RuntimeCore {
 
     /// The held press is selecting text by dragging, and has selected some.
     pub(in crate::runtime) fn selected_by_drag(&self) -> bool {
-        self.edit.selectable.phase.dragging() && self.pointer.press_held().is_some_and(|h| h.moved) && (!self.selection_ranges().is_empty() || self.has_nonempty_selection())
+        self.edit.selectable.phase.dragging() && self.pointer.press_held().is_some_and(|h| h.moved || h.link.is_some()) && (!self.selection_ranges().is_empty() || self.has_nonempty_selection())
     }
 
     pub(in crate::runtime) fn clear_text_selection(&mut self) {
@@ -562,7 +562,7 @@ impl RuntimeCore {
     }
 
     /// Byte offset of node `i`'s text under window point (x, y), where it was drawn this frame.
-    fn text_index_at(&self, i: usize, x: f32, y: f32) -> Option<usize> {
+    pub(in crate::runtime) fn text_index_at(&self, i: usize, x: f32, y: f32) -> Option<usize> {
         let n = &self.tree.nodes[i];
         let (spec, flow) = (n.text.as_ref()?, n.text_layout.as_ref()?.view());
         let s = self.env.scale;
@@ -627,11 +627,12 @@ impl RuntimeCore {
     /// clears the selection.
     pub(in crate::runtime) fn selection_down(&mut self, target: Option<usize>, x: f32, y: f32) {
         use virtual_selection::EndRef;
-        let Some(i) = target.filter(|&i| self.is_selectable(i) && self.can_select_link_at(i, x, y)) else {
+        let Some(i) = target.filter(|&i| self.is_selectable(i)) else {
             self.clear_text_selection();
             self.edit.selectable.presses.clear();
             return;
         };
+        if self.start_link_selection(i, x, y) { return; }
         let Some(at) = self.text_index_at(i, x, y) else { return };
         let path = self.tree.nodes[i].path.clone();
         let content = self.content_of(i).to_owned();

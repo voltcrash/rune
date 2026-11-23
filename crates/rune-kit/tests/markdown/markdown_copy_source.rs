@@ -100,7 +100,7 @@ fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
     #[derive(Default)]
     struct Page { editor: rune::TextEdit, opened: usize }
     let mut rt = Runtime::new(Page::default(), |s, _| col()
-        .child(Markdown::new("[main.rs](src/main.rs)").selectable(true)
+        .child(Markdown::new("[main.rs](src/main.rs) [i](tiny)rest").selectable(true)
             .link_copy_text(|href| Some(rune::LinkCopy::new(format!("[main.rs]({href})"))))
             .on_link(|s: &mut Page, _| s.opened += 1).build(&Kit::neutral(true)).key("reply"))
         .child(rune::text_input(&s.editor, rune::TextStyle::new(14., 400.)).key("editor")
@@ -126,6 +126,27 @@ fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
     rt.pointer_up(left, cy);
     rt.frame(0.);
     assert_eq!(rt.state.opened, 1);
+    rt.update(|_, tx| tx.focus("editor", false));
+    rt.frame(0.);
+    let tiny = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("tiny")).unwrap().rect;
+    let mid = tiny[0] + tiny[2] / 2.;
+    rt.pointer_down(mid - 1., cy);
+    rt.pointer_move(mid + 1., cy);
+    rt.pointer_up(mid + 1., cy);
+    rt.frame(0.);
+    assert_eq!(rt.selected_text().as_deref(), Some("i"));
+    assert_eq!(rt.state.opened, 1, "a two-point drag selected the narrow glyph");
+    rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+    for _ in 0..4 { rt.frame(1. / 60.); }
+    assert_eq!(clipboard.text().as_deref().map(String::as_str), Some("[main.rs](tiny)"));
+    let edge = tiny[0] + tiny[2];
+    rt.pointer_down(edge - 0.5, cy);
+    rt.pointer_up(edge - 0.5, cy);
+    rt.frame(0.);
+    rt.pointer_down(edge + 1., cy);
+    rt.pointer_up(edge + 1., cy);
+    rt.frame(0.);
+    assert!(rt.selected_text().is_none(), "clicking a link does not begin a text double-click");
 }
 
 #[test]
