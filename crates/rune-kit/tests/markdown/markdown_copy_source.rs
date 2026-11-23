@@ -98,8 +98,8 @@ fn a_whole_file_link_copies_its_reference_inside_a_paragraph() {
 #[test]
 fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
     #[derive(Default)]
-    struct Page { editor: rune::TextEdit, opened: usize }
-    let mut rt = Runtime::new(Page::default(), |s, _| col()
+    struct Page { editor: rune::TextEdit, opened: usize, inset: f32 }
+    let mut rt = Runtime::new(Page::default(), |s, _| col().pl(s.inset)
         .child(Markdown::new("[main.rs](src/main.rs) [i](tiny)rest").selectable(true)
             .link_copy_text(|href| Some(rune::LinkCopy::new(format!("[main.rs]({href})"))))
             .on_link(|s: &mut Page, _| s.opened += 1).build(&Kit::neutral(true)).key("reply"))
@@ -164,6 +164,13 @@ fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
     rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
     rt.frame(0.);
     assert_eq!(rt.state.opened, 3, "small pointer motion within the same caret still clicks");
+    let middle = (left + right) / 2.;
+    rt.pointer_down(middle, cy);
+    rt.update(|s, tx| { s.inset = 8.; tx.instant(); });
+    rt.frame(0.);
+    rt.pointer_up(middle, cy);
+    rt.frame(0.);
+    assert_eq!(rt.state.opened, 4, "layout movement during a stationary click is not a drag");
 }
 
 #[test]
