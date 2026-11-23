@@ -1,53 +1,56 @@
-//! A resource-bearing text offer has an identifiable native source for its entire lifetime.
-use std::sync::mpsc;
-use wl_clipboard_rs::copy::{ClipboardType, MimeType, Options, Source};
-use x11rb::protocol::xproto::ConnectionExt;
+//! Ownership of resource-bearing text on Linux. Each selection has its own source.
+use arboard::LinuxClipboardKind;
+use std::sync::{Arc, Weak, mpsc};
 
-pub(super) enum Selection {
-    Wayland(mpsc::Receiver<()>),
-    X11 { clipboard: x11_clipboard::Clipboard, atom: u32 },
+#[path = "wayland_owner.rs"]
+mod wayland;
+
+pub(super) struct Selection {
+    token: Weak<()>,
+    _wayland: Option<calloop::channel::Sender<()>>,
 }
 
 impl Selection {
     pub(super) fn lost(&self) -> bool {
-        match self {
-            Self::Wayland(done) => !matches!(done.try_recv(), Err(mpsc::TryRecvError::Empty)),
-            Self::X11 { clipboard, atom } => {
-                let setter = &clipboard.setter;
-                setter.connection.get_selection_owner(*atom).ok()
-                    .and_then(|cookie| cookie.reply().ok())
-                    .is_some_and(|reply| reply.owner != setter.window)
-            }
-        }
+        self.token.strong_count() == 0
     }
 }
 
-pub(super) fn write(text: &str, primary: bool) -> Result<Selection, String> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() && wl_clipboard_rs::utils::is_primary_selection_supported().is_ok() {
-        return wayland(text.to_owned(), primary);
+pub(super) fn write(
+    board: &mut arboard::Clipboard,
+    text: &str,
+    primary: bool,
+) -> Result<Selection, String> {
+    let token = Arc::new(());
+    let owner = Arc::downgrade(&token);
+    let kind = if primary {
+        LinuxClipboardKind::Primary
+    } else {
+        LinuxClipboardKind::Clipboard
+    };
+    if board
+        .set_x11_text_with_owner(kind, text, token.clone())
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(Selection {
+            token: owner,
+            _wayland: None,
+        });
     }
-    let clipboard = x11_clipboard::Clipboard::new().map_err(|e| e.to_string())?;
-    let atoms = &clipboard.setter.atoms;
-    let atom = if primary { atoms.primary } else { atoms.clipboard };
-    clipboard.store(atom, atoms.utf8_string, text.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(Selection::X11 { clipboard, atom })
-}
-
-fn wayland(text: String, primary: bool) -> Result<Selection, String> {
     let (ready, acquired) = mpsc::sync_channel(1);
-    let (done, cancelled) = mpsc::channel();
-    std::thread::Builder::new().name("rune-clipboard-source".into()).spawn(move || {
-        let mut options = Options::new();
-        options.foreground(true).clipboard(if primary { ClipboardType::Primary } else { ClipboardType::Regular });
-        let source = Source::Bytes(text.into_bytes().into_boxed_slice());
-        match options.prepare_copy(source, MimeType::Text) {
-            Ok(offer) => {
-                if ready.send(Ok(())).is_ok() { let _ = offer.serve(); }
+    let (shutdown, close) = calloop::channel::channel::<()>();
+    let text = text.to_owned();
+    std::thread::Builder::new()
+        .name("rune-clipboard-source".into())
+        .spawn(move || {
+            if let Err(e) = wayland::serve(text, primary, token, close, &ready) {
+                let _ = ready.try_send(Err(e.to_string()));
             }
-            Err(e) => { let _ = ready.send(Err(e.to_string())); }
-        }
-        drop(done);
-    }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
     acquired.recv().map_err(|e| e.to_string())??;
-    Ok(Selection::Wayland(cancelled))
+    Ok(Selection {
+        token: owner,
+        _wayland: Some(shutdown),
+    })
 }

@@ -13,7 +13,7 @@ impl Backend for PrimaryBoard {
         self.0.set().clipboard(Primary).text(copy.content().text()).map_err(|e| e.to_string())
     }
     fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
-        linux_owner::write(copy.content.text(), true).map(|selection| Some(Owner::Linux(selection)))
+        linux_owner::write(&mut self.0, copy.content.text(), true).map(|selection| Some(Owner::Linux(selection)))
     }
     fn text(&mut self) -> Option<Zeroizing<String>> {
         self.0.get().clipboard(Primary).text().ok().filter(|s| !s.is_empty()).map(Zeroizing::new)

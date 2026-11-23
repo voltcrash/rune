@@ -76,7 +76,7 @@ impl Backend for arboard::Clipboard {
     fn write(&mut self, copy: &ClipboardWrite) -> Result<(), String> { write(self, copy) }
     #[cfg(target_os = "linux")]
     fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
-        linux_owner::write(copy.content.text(), false).map(|selection| Some(Owner::Linux(selection)))
+        linux_owner::write(self, copy.content.text(), false).map(|selection| Some(Owner::Linux(selection)))
     }
     #[cfg(target_os = "macos")]
     fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {

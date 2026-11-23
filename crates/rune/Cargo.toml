@@ -121,11 +121,11 @@ libc = { workspace = true }
 pollster = { workspace = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "ios"), not(target_os = "android")))'.dependencies]
-arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
+arboard = { path = "../../vendor/arboard", version = "3.7", default-features = false, features = ["wayland-data-control"] }
 
 # Pasted images on Windows and Linux; macOS reads the pasteboard's PNG or TIFF itself.
 [target.'cfg(any(target_os = "windows", all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android")))))'.dependencies]
-arboard = { version = "3.6", default-features = false, features = ["wayland-data-control", "image-data"] }
+arboard = { path = "../../vendor/arboard", version = "3.7", default-features = false, features = ["wayland-data-control", "image-data"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }
@@ -164,8 +164,9 @@ wayland-backend = { version = "0.3", features = ["client_system"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
-wl-clipboard-rs = "0.9"
-x11-clipboard = "0.9"
+calloop = "0.13"
+calloop-wayland-source = "0.3"
+rustix = { version = "1", features = ["fs"] }
 x11rb = { version = "0.13", features = ["shape", "xinput", "randr", "allow-unsafe-code", "dl-libxcb"] }
 xkbcommon = "0.9"
 

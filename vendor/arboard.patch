@@ -1,0 +1,78 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -82,0 +83,7 @@
++	}
++
++	/// On X11, publish text and keep the token until this selection is replaced.
++	/// Returns false without writing when the clipboard uses Wayland.
++	#[cfg(target_os = "linux")]
++	pub fn set_x11_text_with_owner(&mut self, kind: LinuxClipboardKind, text: &str, owner: std::sync::Arc<()>) -> Result<bool, Error> {
++		self.platform.set_x11_text_with_owner(kind, text, owner)
+--- a/src/platform/linux/mod.rs
++++ b/src/platform/linux/mod.rs
+@@ -131,0 +132,12 @@
++	#[cfg(target_os = "linux")]
++	pub(crate) fn set_x11_text_with_owner(&mut self, kind: LinuxClipboardKind, text: &str, owner: std::sync::Arc<()>) -> Result<bool, Error> {
++		match self {
++			Self::X11(clipboard) => {
++				clipboard.set_text_with_owner(text.into(), kind, WaitConfig::None, false, Some(owner))?;
++				Ok(true)
++			}
++			#[cfg(feature = "wayland-data-control")]
++			Self::WlDataControl(_) => Ok(false),
++		}
++	}
++
+--- a/src/platform/linux/x11.rs
++++ b/src/platform/linux/x11.rs
+@@ -180 +180 @@
+-	data: RwLock<Option<Vec<ClipboardData>>>,
++	data: RwLock<Option<(Vec<ClipboardData>, Option<Arc<()>>)>>,
+@@ -248,0 +249 @@
++		owner: Option<Arc<()>>,
+@@ -259 +260 @@
+-		*data_guard = Some(data);
++		*data_guard = Some((data, owner));
+@@ -309 +310 @@
+-			if let Some(data_list) = &*data {
++			if let Some((data_list, _)) = &*data {
+@@ -616 +617 @@
+-			let (data_targets, excluded) = if let Some(data_list) = &*data {
++			let (data_targets, excluded) = if let Some((data_list, _)) = &*data {
+@@ -671,2 +672,7 @@
+-			if let Some(data_list) = &*data {
+-				success = match data_list.iter().find(|d| d.format == event.target) {
++			if let Some((data_list, _)) = &*data {
++				let target = if event.target == self.atoms.UTF8_MIME_0 || event.target == self.atoms.UTF8_MIME_1 {
++					self.atoms.UTF8_STRING
++				} else {
++					event.target
++				};
++				success = match data_list.iter().find(|d| d.format == target) {
+@@ -738 +744 @@
+-			Some(data) => {
++			Some((data, _)) => {
+@@ -996,0 +1003,11 @@
++		self.set_text_with_owner(message, selection, wait, exclude_from_history, None)
++	}
++
++	pub(crate) fn set_text_with_owner(
++		&self,
++		message: Cow<'_, str>,
++		selection: LinuxClipboardKind,
++		wait: WaitConfig,
++		exclude_from_history: bool,
++		owner: Option<Arc<()>>,
++	) -> Result<()> {
+@@ -1005 +1022 @@
+-		self.inner.write(data, selection, wait)
++		self.inner.write(data, selection, wait, owner)
+@@ -1043 +1060 @@
+-		self.inner.write(data, selection, wait)
++		self.inner.write(data, selection, wait, None)
+@@ -1079 +1096 @@
+-		self.inner.write(data, selection, wait)
++		self.inner.write(data, selection, wait, None)
+@@ -1101 +1118 @@
+-		self.inner.write(data, selection, wait)
++		self.inner.write(data, selection, wait, None)
