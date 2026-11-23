@@ -237,7 +237,8 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
             .child(text_input(&s.a, st).key("a").size(300.0, 140.0).on_edit(|s: &mut App| &mut s.a))
             .child(text_input(&s.b, st).key("b").size(300.0, 140.0).on_edit(|s: &mut App| &mut s.b))
             .child(text_input(&s.plain, st).key("plain").size(300.0, 40.0).on_edit(|s: &mut App| &mut s.plain)
-                .input_copy_text(|e| {
+                .input_copy_text_for(|e, destination| {
+                    assert_eq!(destination, crate::CopyDestination::Clipboard);
                     assert!(!e.selected().is_empty(), "no formatter for a collapsed selection");
                     (e.selected() == "chip").then(|| "path/to/chip".to_string())
                 }))

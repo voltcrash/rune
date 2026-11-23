@@ -168,7 +168,7 @@ impl RuntimeCore {
             let text = format.as_ref().and_then(|f| {
                 if e.is_secure() { return None; }
                 e.sync_invariants();
-                if e.anchor == e.focus { None } else { f(e) }
+                if e.anchor == e.focus { None } else { f(e, crate::CopyDestination::Clipboard) }
             });
             if rich_copy && copies && text.is_none() && !e.is_secure() && e.is_rich() {
                 html = Some(e.selected_html()).filter(|h| !h.is_empty());

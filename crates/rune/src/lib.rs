@@ -126,6 +126,7 @@ pub use el::row;
 pub use el::rule;
 pub use el::spacer;
 pub use el::text;
+pub use el::CopyDestination;
 pub use el::text_input;
 pub use file_dialog::FileDialogError;
 pub use file_dialog::FileDialogKind;

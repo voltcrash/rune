@@ -2,7 +2,14 @@
 
 use super::*;
 
-type InputCopyTextFn = Rc<dyn Fn(&TextEdit) -> Option<String>>;
+/// Which selection receives the text copied from an input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyDestination {
+    Clipboard,
+    PrimarySelection,
+}
+
+type InputCopyTextFn = Rc<dyn Fn(&TextEdit, CopyDestination) -> Option<String>>;
 
 /// A text field bound to a [`TextEdit`] in app state.
 #[derive(Clone)]
@@ -221,7 +228,12 @@ impl El {
     /// Supplies plain clipboard text for a selection, for example a file mention's full path.
     /// Returning `None` keeps the ordinary copy, including rich formatting. Runs before a cut.
     /// Secure fields and empty selections skip the callback.
-    pub fn input_copy_text(mut self, f: impl Fn(&TextEdit) -> Option<String> + 'static) -> Self {
+    pub fn input_copy_text(self, f: impl Fn(&TextEdit) -> Option<String> + 'static) -> Self {
+        self.input_copy_text_for(move |edit, _| f(edit))
+    }
+    /// Like [`El::input_copy_text`], with the destination so resources copied to the primary
+    /// selection and the clipboard can have independent lifetimes.
+    pub fn input_copy_text_for(mut self, f: impl Fn(&TextEdit, CopyDestination) -> Option<String> + 'static) -> Self {
         if let Some(input) = self.cold.get_mut_if_some().and_then(|c| c.input.as_deref_mut()) {
             input.copy_text = Some(Rc::new(f));
         }
