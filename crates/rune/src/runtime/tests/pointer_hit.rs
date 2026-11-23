@@ -122,6 +122,8 @@ fn deleting_a_focused_row_does_not_call_its_stale_edit_accessor() {
     rt.frame(0.0);
     let path = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("delete")).unwrap().path.clone();
     rt.frame.queue.push(Action::Press(path, crate::PointerButton::Primary, false));
+    #[cfg(target_os = "linux")]
+    rt.split_mut().0.primary_released();
     rt.frame(0.0);
     assert!(rt.state.is_empty());
     assert!(!rt.has_focus());

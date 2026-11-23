@@ -291,11 +291,10 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
     assert_eq!(m.content().unwrap().text(), "path/to/chip");
     #[cfg(target_os = "linux")]
     {
-        rt.state.plain.set_selection(1, 3);
-        let (core, mut app) = rt.split_mut();
-        core.primary_released();
-        core.note_primary_selection(&mut app);
-        assert_eq!(core.edit.primary.write.take().as_deref(), Some("selected:hi"));
+        rt.update(|s, _| s.plain.set_selection(1, 3));
+        rt.split_mut().0.primary_released();
+        rt.frame(0.0);
+        assert_eq!(rt.edit.primary.write.take().as_deref(), Some("selected:hi"));
         rt.state.plain.set_selection(0, 4);
     }
     m.set_content(ClipboardContent::new("previous clipboard"));
