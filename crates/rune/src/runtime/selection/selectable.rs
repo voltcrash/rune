@@ -234,7 +234,7 @@ impl caret::TextInputState {
             sel.and_then(|s| s.far.as_ref()).map(|f| f.path.clone()), phase.dragging())
     }
 
-    pub(super) fn cached_selection_snapshot(&self, commits: u64) -> Option<Option<Rc<TextSelection>>> {
+    pub(in crate::runtime) fn cached_selection_snapshot(&self, commits: u64) -> Option<Option<Rc<TextSelection>>> {
         let cache = self.sel_snapshot.borrow();
         cache.as_ref().filter(|s| self.same_selection_basis(commits, &s.from)).map(|s| s.selection.clone())
     }

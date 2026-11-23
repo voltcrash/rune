@@ -489,7 +489,8 @@ fn primary_release_keeps_virtual_text_when_its_selection_handler_removes_the_row
     tick(&mut rt);
     rt.update(|_, tx| tx.select_all_text("rows"));
     tick(&mut rt);
-    rt.split_mut().0.primary_released();
+    { let (core, app) = rt.split_mut(); core.primary_released(&app); }
+    rt.invalidate();
     tick(&mut rt);
     assert!(rt.state.is_empty());
     assert_eq!(rt.edit.primary.write.as_deref(), Some(expected.as_str()));

@@ -13,6 +13,7 @@ use super::*;
 pub(crate) struct PrimarySelection {
     /// A primary button came up: after this frame's handlers, what's selected goes on it.
     pending: bool,
+    text: Option<String>,
     /// A hash of the text last put on it, so a click that leaves the selection as it was
     /// writes nothing.
     written: Option<u64>,
@@ -28,20 +29,20 @@ pub(in crate::runtime) enum PrimarySource {
 }
 
 impl RuntimeCore {
-    /// The primary button came up.
-    pub(in crate::runtime) fn primary_released(&mut self) {
+    /// Text selected by a pointer is final on release, before callbacks can change virtual rows.
+    pub(in crate::runtime) fn primary_released(&mut self, app: &dyn ViewDriver) {
         self.edit.primary.pending = true;
-    }
-
-    /// Unmounted rows must be read while their builder and the application model agree.
-    pub(in crate::runtime) fn primary_text_before_handlers(&self, app: &dyn ViewDriver) -> Option<String> {
-        if !self.edit.primary.pending || self.commit.dirty { return None; }
-        self.selected_text(app)
+        self.edit.primary.text = if self.commit.dirty && self.selection_spans_unmounted() {
+            self.edit.cached_selection_snapshot(self.commit.commits).flatten().map(|s| s.text().to_owned())
+        } else {
+            self.selected_text(app)
+        };
     }
 
     /// Holds the selection's source before a release handler's requested focus takes effect.
-    pub(in crate::runtime) fn take_primary_source(&mut self, text: Option<String>) -> Option<PrimarySource> {
+    pub(in crate::runtime) fn take_primary_source(&mut self) -> Option<PrimarySource> {
         if !std::mem::take(&mut self.edit.primary.pending) { return None; }
+        let text = self.edit.primary.text.take();
         if let Some(path) = self.kbd.focus.path() && self.input_at(path).is_some() {
             return Some(PrimarySource::Field(path.to_owned()));
         }

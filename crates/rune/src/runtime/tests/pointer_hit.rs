@@ -128,14 +128,14 @@ fn deleting_a_focused_row_does_not_call_its_stale_edit_accessor() {
     {
         let path = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("redirect")).unwrap().path.clone();
         rt.frame.queue.push(Action::Press(path, crate::PointerButton::Primary, false));
-        rt.split_mut().0.primary_released();
+        { let (core, app) = rt.split_mut(); core.primary_released(&app); }
         rt.frame(0.0);
         assert_eq!(rt.edit.primary.write.take().as_deref(), Some("source"));
     }
     let path = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("delete")).unwrap().path.clone();
     rt.frame.queue.push(Action::Press(path, crate::PointerButton::Primary, false));
     #[cfg(target_os = "linux")]
-    rt.split_mut().0.primary_released();
+    { let (core, app) = rt.split_mut(); core.primary_released(&app); }
     rt.frame(0.0);
     assert!(rt.state.is_empty());
     assert!(!rt.has_focus());

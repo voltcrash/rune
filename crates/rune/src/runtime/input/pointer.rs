@@ -338,13 +338,13 @@ impl RuntimeCore {
 
     pub(crate) fn pointer_up(&mut self, app: &dyn ViewDriver, x: f32, y: f32) {
         if self.pointer.autoscroll_release(crate::PointerButton::Primary) { self.pointer.pos = Some((x, y)); return; }
-        #[cfg(target_os = "linux")]
-        self.primary_released();
         if self.pointer.press.held().is_some_and(|h| h.button != crate::PointerButton::Primary) {
             self.pointer.pos = Some((x, y));
-            return;
+        } else {
+            self.release_capture(app, x, y);
         }
-        self.release_capture(app, x, y);
+        #[cfg(target_os = "linux")]
+        self.primary_released(app);
     }
 
     /// The platform lost the release of a held press, so nothing was dropped: a held drag ends

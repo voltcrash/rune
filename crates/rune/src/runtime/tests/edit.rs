@@ -292,7 +292,7 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
     #[cfg(target_os = "linux")]
     {
         rt.update(|s, _| s.plain.set_selection(1, 3));
-        rt.split_mut().0.primary_released();
+        { let (core, app) = rt.split_mut(); core.primary_released(&app); }
         rt.frame(0.0);
         assert_eq!(rt.edit.primary.write.take().as_deref(), Some("selected:hi"));
         rt.state.plain.set_selection(0, 4);
