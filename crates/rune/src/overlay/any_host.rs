@@ -264,7 +264,7 @@ impl AnyHost for OverlayHost {
                 }
                 if core.control_click {
                     if input_enabled && let Some((x, y)) = app.rt().pointer() {
-                        if pressed { app.rt_mut().secondary_down(x, y); } else { app.secondary_up(x, y); }
+                        app.control_click(x, y, pressed);
                         core.dirty = true;
                     }
                     if !pressed { core.control_click = false; }

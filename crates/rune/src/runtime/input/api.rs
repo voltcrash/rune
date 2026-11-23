@@ -83,7 +83,7 @@ impl<S: 'static> Runtime<S> {
     pub fn secondary_down(&mut self, x: f32, y: f32) { self.core_mut().secondary_down(x, y); }
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline(always)]
-    pub(crate) fn secondary_claim(&self) -> &'static str { self.core().secondary_claim() }
+    pub(crate) fn secondary_claim(&self, physical: bool) -> &'static str { self.core().secondary_claim(physical) }
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline(always)]
     pub(crate) fn secondary_abandon(&mut self) { self.core_mut().secondary_abandon(); }

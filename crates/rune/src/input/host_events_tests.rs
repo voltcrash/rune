@@ -372,6 +372,7 @@ fn mouse_button_core_handles_macos_ctrl_click_left_down_mods_and_middle_buttons(
     struct S {
         primary: Vec<crate::Mods>,
         secondary: usize,
+        right: Vec<crate::PointerPhase>,
         middle: usize,
         physical_mods: Vec<crate::Mods>,
     }
@@ -379,6 +380,7 @@ fn mouse_button_core_handles_macos_ctrl_click_left_down_mods_and_middle_buttons(
         el().key("target").size(100.0, 100.0).focusable(true)
             .on_press_tx(|s: &mut S, tx| s.primary.push(tx.mods()))
             .on_secondary_press(|s: &mut S, _, _| s.secondary += 1)
+            .on_secondary_pointer(|s: &mut S, phase, _, _| s.right.push(phase))
             .on_middle_press(|s: &mut S, _| s.middle += 1)
             .on_physical_input(|s: &mut S, ev, _| {
                 if let crate::PhysicalInput::Modifiers(m) = ev {
@@ -405,6 +407,9 @@ fn mouse_button_core_handles_macos_ctrl_click_left_down_mods_and_middle_buttons(
     };
     assert_eq!(down, ButtonAction::SecondaryDown);
     assert!(control_click);
+    rt.secondary_down(50., 50.);
+    assert_eq!(rt.core().secondary_claim(true), "canvas");
+    assert_eq!(rt.core().secondary_claim(false), "app");
     let up = {
         let (core, mut app) = rt.split_mut();
         mouse_button_core(core, &mut app, MouseButtonInput {
@@ -416,6 +421,11 @@ fn mouse_button_core_handles_macos_ctrl_click_left_down_mods_and_middle_buttons(
     assert!(!control_click);
     rt.frame(0.0);
     assert_eq!((rt.state.primary.len(), rt.state.secondary), (0, 1));
+
+    assert_eq!(rt.state.right, [crate::PointerPhase::Down]);
+    rt.secondary_up(50., 50.);
+    rt.frame(0.);
+    assert_eq!(rt.state.right, [crate::PointerPhase::Down, crate::PointerPhase::Up]);
 
     // Off macOS (ctrl_click_is_secondary = false), Ctrl+Left stays primary and queues modifiers for the newly focused element.
     let down = {

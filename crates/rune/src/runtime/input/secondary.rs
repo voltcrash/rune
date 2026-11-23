@@ -37,15 +37,15 @@ impl RuntimeCore {
     }
 
     pub(super) fn secondary_pointer_event(&mut self, phase: crate::PointerPhase, x: f32, y: f32) -> bool {
-        let capture::Secondary::Pointer { path, left } = self.pointer.secondary() else { return false };
+        let Some((path, left)) = &self.pointer.secondary_pointer else { return false };
         let left = *left;
         if let Some(i) = self.live_index(path) {
             self.frame.queue.push(Action::SecondaryPointer(path.clone(), phase, self.pointer_event(i, x, y), self.kbd.held_mods));
         }
         if matches!(phase, crate::PointerPhase::Up | crate::PointerPhase::Cancel) {
-            self.pointer.clear_secondary();
+            self.pointer.secondary_pointer = None;
             self.pointer.release_tint(crate::PointerButton::Secondary);
-            if !self.pointer.press.is_held() { self.leave_after_release(left); }
+            if !self.pointer.captured() { self.leave_after_release(left); }
         }
         true
     }
@@ -64,6 +64,10 @@ impl RuntimeCore {
         self.begin_secondary(x, y, true);
     }
 
+    pub(crate) fn control_click(&mut self, app: &dyn ViewDriver, x: f32, y: f32, down: bool) {
+        if down { self.begin_secondary(x, y, false); } else { self.release_menu(app, x, y, false); }
+    }
+
     pub(super) fn touch_context_menu(&mut self, app: &dyn ViewDriver, x: f32, y: f32) {
         self.begin_secondary(x, y, false);
         self.release_menu(app, x, y, false);
@@ -79,7 +83,7 @@ impl RuntimeCore {
         let path = self.secondary_target(x, y, physical).map(str::to_owned);
         let i = path.as_ref().and_then(|p| self.tree.nodes.iter().position(|n| n.path == *p));
         if let Some(i) = i.filter(|&i| physical && self.secondary_pointer_handler(i)) {
-            self.pointer.set_secondary(capture::Secondary::Pointer { path: self.tree.nodes[i].path.clone(), left: false });
+            self.pointer.secondary_pointer = Some((self.tree.nodes[i].path.clone(), false));
             self.secondary_pointer_event(crate::PointerPhase::Down, x, y);
             return;
         }
@@ -111,12 +115,12 @@ impl RuntimeCore {
     }
 
     /// What the secondary press being held is on, for a browser that shows its own context
-    /// menu: `"app"` when an element's menu or a link's takes it (Rune draws that), `"field"` on
-    /// a text field, `"text"` on selectable text alone, `""` on nothing of Rune's.
+    /// menu: `"canvas"` on a physical pointer handler, `"app"` on an element or link menu,
+    /// `"field"` on a text field, `"text"` on selectable text alone, or `""` elsewhere.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn secondary_claim(&self) -> &'static str {
-        if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) { return "app"; }
-        if matches!(self.pointer.secondary(), capture::Secondary::Pointer { .. }) { return "app"; }
+    pub(crate) fn secondary_claim(&self, physical: bool) -> &'static str {
+        if physical && self.pointer.secondary_pointer.is_some() { return "canvas"; }
+        if physical && self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) { return "app"; }
         let capture::Secondary::Held { path, link, .. } = self.pointer.secondary() else { return "" };
         let Some(n) = self.tree.nodes.iter().find(|n| n.path == *path) else { return "" };
         if link.is_some() || n.handlers.on_secondary_press.is_some() { return "app"; }
@@ -147,7 +151,6 @@ impl RuntimeCore {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline]
     pub(crate) fn secondary_abandon(&mut self) {
-        self.cancel_secondary_pointer();
         self.pointer.abandon_secondary();
         if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
             if !self.cancel_drag() { self.drop_press(); }
@@ -156,7 +159,7 @@ impl RuntimeCore {
     }
 
     pub(crate) fn secondary_up(&mut self, app: &dyn ViewDriver, x: f32, y: f32) {
-        if matches!(self.pointer.secondary(), capture::Secondary::Pointer { .. }) {
+        if self.pointer.secondary_pointer.is_some() {
             if self.pointer.pos != Some((x, y)) { self.move_pointer(app, x, y, true); }
             self.secondary_pointer_event(crate::PointerPhase::Up, x, y);
             return;
@@ -176,7 +179,7 @@ impl RuntimeCore {
         self.secondary_region_up(x, y);
         let (path, down_link, left) = match self.pointer.take_secondary() {
             capture::Secondary::Held { path, link, left } => (Some(path), link, left),
-            capture::Secondary::Pointer { .. } | capture::Secondary::Up => (None, None, false),
+            capture::Secondary::Up => (None, None, false),
         };
         if let Some(path) = path
             && self.secondary_target(x, y, physical) == Some(path.as_str())
@@ -192,7 +195,7 @@ impl RuntimeCore {
                 _ => {}
             }
         }
-        self.leave_after_release(left);
+        if !self.pointer.captured() { self.leave_after_release(left); }
     }
 
     /// A secondary press at (x, y) on text field `path` with no `on_secondary_press` of its own:

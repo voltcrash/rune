@@ -337,7 +337,7 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
     }
     // Right-click (and Ctrl+click on macOS): Rune draws an element's own menu; anywhere else the
     // browser opens its own over what a page would have there (the selection, a link, text, a text
-    // field), never the canvas's image menu; Shift+right-click always opens the browser's. Armed
+    // field). A physical canvas handler keeps its gesture, including Shift+right-click. Armed
     // before the menu's event, which on Windows and Linux follows the release; macOS's follows the
     // press, which Rune has just heard (`syncSecondary`).
     const isSecondaryPress = event => event.button === 2 || (MAC && event.button === 0 && event.ctrlKey);
@@ -397,7 +397,7 @@ export function syncCopy(h, text) {
 }
 
 // What the right-click Rune just heard is on: 'app' (an element's menu, which Rune draws),
-// 'field', 'text' or '' (`Runtime::secondary_claim`).
+// 'canvas', 'field', 'text' or '' (`Runtime::secondary_claim`).
 export function syncSecondary(h, claim) {
     h.secondary = claim;
 }
@@ -640,7 +640,7 @@ function armMenu(h, x, y, browser) {
     disarmMenu(h);
     const claim = h.secondary === 'app' && browser ? 'text' : h.secondary;
     h.secondary = '';
-    if (claim === 'app') { h.menu = 'rune'; return false; }
+    if (claim === 'canvas' || claim === 'app') { h.menu = 'rune'; return false; }
     h.menu = 'browser';
     if (claim === 'field' && h.key) {
         // The page's field holds the Rune field's text and selection: its menu's Cut, Copy, Paste

@@ -490,8 +490,7 @@ impl Host {
                 }
                 if let Some((x, y)) = button_at(app, &l.window) {
                     match (state, self.control_click) {
-                        (ElementState::Pressed, true) => app.rt_mut().secondary_down(x, y),
-                        (ElementState::Released, true) => app.secondary_up(x, y),
+                        (state, true) => app.control_click(x, y, state.is_pressed()),
                         (ElementState::Pressed, false) => {
                             #[cfg(target_os = "macos")]
                             app.rt_mut().set_native_titlebar_band(mac::native_titlebar_band(&l.window));

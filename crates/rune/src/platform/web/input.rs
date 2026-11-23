@@ -504,7 +504,7 @@ impl Running {
                     }
                     crate::input::host_events::ButtonAction::SecondaryDown => {
                         // The browser's own menu opens where Rune's doesn't (bridge.js).
-                        sync_secondary(&self.input.handle, self.app.rt().secondary_claim());
+                        sync_secondary(&self.input.handle, self.app.rt().secondary_claim(*button == winit::event::MouseButton::Right));
                     }
                     crate::input::host_events::ButtonAction::SecondaryUp
                     | crate::input::host_events::ButtonAction::OtherDown(_)
