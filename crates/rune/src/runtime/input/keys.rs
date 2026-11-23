@@ -165,12 +165,13 @@ impl RuntimeCore {
         let format = if copies { self.focused_input().and_then(|i| i.copy_text.clone()) } else { None };
         let mut html = None;
         let handled = self.with_focused(app, |e| {
-            let mut text = None;
-            if copies && !e.is_secure() && e.anchor != e.focus {
-                text = format.as_ref().and_then(|f| f(e));
-                if rich_copy && text.is_none() && e.is_rich() {
-                    html = Some(e.selected_html()).filter(|h| !h.is_empty());
-                }
+            let text = format.as_ref().and_then(|f| {
+                if e.is_secure() { return None; }
+                e.sync_invariants();
+                if e.anchor == e.focus { None } else { f(e) }
+            });
+            if rich_copy && copies && text.is_none() && !e.is_secure() && e.is_rich() {
+                html = Some(e.selected_html()).filter(|h| !h.is_empty());
             }
             let mut out = e.key_in(ev, layout.as_ref().map(TextLayout::view));
             if out.copy.is_some() && let Some(text) = text { out.copy = Some(text); }
