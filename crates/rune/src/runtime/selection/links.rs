@@ -228,6 +228,11 @@ impl RuntimeCore {
             .find(|(_, r)| contains(*r, x, y)).map(|(k, _)| k)
     }
 
+    pub(in crate::runtime) fn can_select_link_at(&self, i: usize, x: f32, y: f32) -> bool {
+        self.link_at(i, x, y).is_none_or(|k| self.tree.nodes[i].text.as_ref()
+            .and_then(|text| text.cold.links.get(k)).is_some_and(|link| link.copy_text.is_some()))
+    }
+
     /// The id of the `Mark::Pill` in text field `i` under window point `(x, y)`, if any.
     pub(in crate::runtime) fn input_pill_at(&self, i: usize, x: f32, y: f32) -> Option<String> {
         let n = &self.tree.nodes[i];

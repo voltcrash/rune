@@ -1,0 +1,1 @@
+- Select the text of a link with custom clipboard text by dragging from inside its label. A click still opens the link.

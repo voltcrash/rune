@@ -96,6 +96,39 @@ fn a_whole_file_link_copies_its_reference_inside_a_paragraph() {
 }
 
 #[test]
+fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
+    #[derive(Default)]
+    struct Page { editor: rune::TextEdit, opened: usize }
+    let mut rt = Runtime::new(Page::default(), |s, _| col()
+        .child(Markdown::new("[main.rs](src/main.rs)").selectable(true)
+            .link_copy_text(|href| Some(rune::LinkCopy::new(format!("[main.rs]({href})"))))
+            .on_link(|s: &mut Page, _| s.opened += 1).build(&Kit::neutral(true)).key("reply"))
+        .child(rune::text_input(&s.editor, rune::TextStyle::new(14., 400.)).key("editor")
+            .on_edit(rune::edit_access(|s: &mut Page| &mut s.editor))), (360., 140.), Env::new(true, 1.));
+    rt.frame(0.);
+    let clipboard = rune::clipboard::memory();
+    rt.use_clipboard(&clipboard);
+    rt.update(|_, tx| tx.focus("editor", false));
+    rt.frame(0.);
+    let link = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("src/main.rs")).unwrap();
+    let [x, y, w, h] = link.rect;
+    let (left, right, cy) = (x + 0.5, x + w - 0.5, y + h / 2.);
+    rt.pointer_down(left, cy);
+    rt.pointer_move(right, cy);
+    rt.pointer_up(right, cy);
+    rt.frame(0.);
+    assert_eq!(rt.selected_text().as_deref(), Some("main.rs"));
+    assert_eq!(rt.state.opened, 0);
+    rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+    for _ in 0..4 { rt.frame(1. / 60.); }
+    assert_eq!(clipboard.text().as_deref().map(String::as_str), Some("[main.rs](src/main.rs)"));
+    rt.pointer_down(left, cy);
+    rt.pointer_up(left, cy);
+    rt.frame(0.);
+    assert_eq!(rt.state.opened, 1);
+}
+
+#[test]
 fn a_cached_link_can_replace_its_tooltip_with_clipboard_text() {
     let mut rt = Runtime::new(false, |copying, _| {
         let md = Markdown::new("[label](target)").selectable(true).on_link(|_: &mut bool, _| {});

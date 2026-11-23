@@ -627,7 +627,7 @@ impl RuntimeCore {
     /// clears the selection.
     pub(in crate::runtime) fn selection_down(&mut self, target: Option<usize>, x: f32, y: f32) {
         use virtual_selection::EndRef;
-        let Some(i) = target.filter(|&i| self.is_selectable(i) && self.link_at(i, x, y).is_none()) else {
+        let Some(i) = target.filter(|&i| self.is_selectable(i) && self.can_select_link_at(i, x, y)) else {
             self.clear_text_selection();
             self.edit.selectable.presses.clear();
             return;
