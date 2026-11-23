@@ -285,23 +285,23 @@ fn formatted_copies_retain_their_resource_until_the_clipboard_is_replaced() {
 
 
 #[test]
-fn a_clipboard_without_revisions_releases_resources_when_its_text_changes() {
-    struct TextBoard(String);
-    impl Backend for TextBoard {
-        fn write(&mut self, copy: &ClipboardWrite) -> Result<(), String> { self.0 = copy.to_string(); Ok(()) }
-        fn text(&mut self) -> Option<Zeroizing<String>> { Some(Zeroizing::new(self.0.clone())) }
-        fn revision(&self) -> Option<u64> { None }
-        fn clear(&mut self) -> Result<(), String> { self.0.clear(); Ok(()) }
+fn an_unknown_clipboard_revision_does_not_drop_a_resource_or_read_text() {
+    struct Board(Option<u64>);
+    impl Backend for Board {
+        fn write(&mut self, _: &ClipboardWrite) -> Result<(), String> { Ok(()) }
+        fn text(&mut self) -> Option<Zeroizing<String>> { panic!("ownership must not read clipboard text") }
+        fn revision(&self) -> Option<u64> { self.0 }
+        fn clear(&mut self) -> Result<(), String> { Ok(()) }
     }
-    let (mut core, mut board) = (Core::default(), TextBoard(String::new()));
+    let (mut core, mut board) = (Core::default(), Board(Some(1)));
     let file = Arc::new(());
     let weak = Arc::downgrade(&file);
     core.handle(&mut board, Request::Write(ClipboardWrite::text("reference").with_resource(file), None));
+    board.0 = None;
     core.tick_at(&mut board, core.next_check().unwrap());
     assert!(weak.upgrade().is_some());
-    board.0 = "other selection".into();
+    board.0 = Some(2);
     core.tick_at(&mut board, core.next_check().unwrap());
     assert!(weak.upgrade().is_none());
     assert!(core.next_check().is_none());
-    assert_eq!(board.0, "other selection");
 }

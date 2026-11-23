@@ -30,7 +30,7 @@ const MAX_RTF_CONVERT_BYTES: usize = 1024 * 1024;
 /// item holds the text (unless it's empty and another form isn't), HTML, RTF and the image as
 /// PNG and TIFF (for apps that take only TIFF); each file is an item of its own with its file
 /// URL, as Finder writes a copy of several files, so a file manager pastes them all.
-pub(super) fn write(pb: &NSPasteboard, content: &ClipboardContent) -> Result<(), String> {
+pub(super) fn write(pb: &NSPasteboard, content: &ClipboardContent) -> Result<u64, String> {
     // SAFETY: `pb` is a live `NSPasteboard`, every Foundation/AppKit argument and static
     // pasteboard type constant is valid, and `autoreleasepool` bounds autoreleased temporaries.
     autoreleasepool(|_| unsafe {
@@ -57,11 +57,11 @@ pub(super) fn write(pb: &NSPasteboard, content: &ClipboardContent) -> Result<(),
             let url = path.to_str().and_then(|p| NSURL::fileURLWithPath(&NSString::from_str(p)).absoluteString());
             if !url.is_some_and(|url| item.setString_forType(&url, NSPasteboardTypeFileURL)) { return Err(refused("file")); }
         }
-        pb.clearContents();
+        let generation = pb.clearContents();
         let objects: Vec<_> = items.into_iter().map(ProtocolObject::from_retained).collect();
         let objects = NSArray::from_retained_slice(&objects);
         if !pb.writeObjects(&objects) { return Err(refused("content")); }
-        Ok(())
+        Ok(generation as u64)
     })
 }
 
@@ -237,8 +237,9 @@ mod tests {
         let Some(pb) = pb else { return eprintln!("no pasteboard server; skipped") };
         let before = pb.changeCount();
         let content = ClipboardContent::new("Hi there").with_html("<b>Hi</b> there").with_rtf(RTF);
-        write(&pb, &content).unwrap();
-        assert_eq!(pb.changeCount(), before + 1);
+        let generation = write(&pb, &content).unwrap();
+        assert_eq!(generation, (before + 1) as u64);
+        assert_eq!(generation, pb.changeCount() as u64);
         let back = read(&pb, true).unwrap();
         assert_eq!(back.text(), "Hi there");
         assert!(back.html().unwrap().ends_with("<b>Hi</b> there"));

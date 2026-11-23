@@ -3805,6 +3805,7 @@ dependencies = [
  "blake3",
  "block2 0.6.2",
  "bytemuck",
+ "clipboard-win",
  "console_error_panic_hook",
  "dioxus-devtools",
  "futures-lite",
@@ -3857,6 +3858,8 @@ dependencies = [
  "windows-core",
  "windows-sys 0.61.2",
  "winit",
+ "wl-clipboard-rs",
+ "x11-clipboard",
  "x11rb",
  "xkbcommon",
  "zbus",
@@ -5934,6 +5937,16 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "x11-clipboard"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "662d74b3d77e396b8e5beb00b9cad6a9eccf40b2ef68cc858784b14c41d535a3"
+dependencies = [
+ "libc",
+ "x11rb",
+]
 
 [[package]]
 name = "x11-dl"

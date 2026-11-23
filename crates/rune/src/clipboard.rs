@@ -33,6 +33,10 @@ mod macos;
 mod native;
 #[cfg(target_os = "linux")]
 mod primary;
+#[cfg(target_os = "linux")]
+mod linux_owner;
+#[cfg(target_os = "windows")]
+mod windows_owner;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_os = "macos")]
@@ -317,6 +321,10 @@ pub(crate) fn shutdown() {
 
 trait Backend {
     fn write(&mut self, copy: &ClipboardWrite) -> Result<(), String>;
+    fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
+        self.write(copy)?;
+        Ok(self.revision().map(Owner::Revision))
+    }
     fn text(&mut self) -> Option<Zeroizing<String>>;
     /// Every form a paste can use, unsanitised, and the image and files only when asked (`all`):
     /// decoding an image can take a while.
@@ -350,22 +358,30 @@ impl WriteSteps for RealTime {
     fn now(&self) -> Instant { crate::time::now() }
 }
 
-struct Retained {
-    _resource: Arc<dyn Send + Sync>,
-    print: u64,
-    revision: Option<u64>,
-    next: Instant,
+enum Owner {
+    Revision(u64),
+    #[cfg(target_os = "linux")]
+    Linux(linux_owner::Selection),
+    #[cfg(target_os = "windows")]
+    Windows(windows_owner::Source),
 }
 
-impl Retained {
-    fn for_write(copy: &ClipboardWrite, revision: Option<u64>, keys: &RandomState) -> Option<Self> {
-        let resource = copy.resource.clone()?;
-        Some(Self { _resource: resource, print: keys.hash_one(copy.content.text()), revision, next: crate::time::now() + WATCH })
+impl Owner {
+    fn lost(&self, board: &impl Backend) -> bool {
+        match self {
+            Self::Revision(revision) => board.revision().is_some_and(|now| now != *revision),
+            #[cfg(target_os = "linux")]
+            Self::Linux(selection) => selection.lost(),
+            #[cfg(target_os = "windows")]
+            Self::Windows(source) => source.lost(),
+        }
     }
+}
 
-    fn matches(&self, text: Option<&str>, keys: &RandomState) -> bool {
-        text.is_some_and(|s| keys.hash_one(s) == self.print)
-    }
+struct Retained {
+    _resource: Arc<dyn Send + Sync>,
+    owner: Owner,
+    next: Instant,
 }
 
 /// The clipboard owner's bookkeeping, shared by the OS worker and the memory clipboard.
@@ -411,14 +427,20 @@ impl Core {
         let slot = copy.slot().cloned();
         let notify = notify.filter(|_| slot.is_some());
         if slot.as_ref().is_some_and(|s| s.cancelled()) { return; } // `Unwritten` settles it as cleared.
-        if let Err(error) = cb.write(&copy) {
-            if let Some(s) = &slot { s.set(SecretState::Failed(error)); }
-            if let Some(n) = &notify { n.send(); }
-            return;
-        }
+        let result = if copy.resource.is_some() { cb.write_owned(&copy) } else { cb.write(&copy).map(|()| None) };
+        let owner = match result {
+            Ok(owner) => owner,
+            Err(error) => {
+                if let Some(s) = &slot { s.set(SecretState::Failed(error)); }
+                if let Some(n) = &notify { n.send(); }
+                return;
+            }
+        };
         self.apply(cb, HoldEvent::Lost);
         let rev = cb.revision();
-        self.retained = Retained::for_write(&copy, rev, &self.keys);
+        self.retained = owner.zip(copy.resource.clone()).map(|(owner, resource)| Retained {
+            owner, _resource: resource, next: crate::time::now() + WATCH,
+        });
         self.own_pills = copy
             .clear_after
             .is_none()
@@ -486,15 +508,10 @@ impl Core {
     fn tick<B: Backend>(&mut self, cb: &mut B) { self.tick_at(cb, crate::time::now()); }
 
     fn tick_at<B: Backend>(&mut self, cb: &mut B, now: Instant) {
-        if let Some(held) = &mut self.retained {
-            let current = if let Some(rev) = held.revision {
-                cb.revision() == Some(rev)
-            } else if now >= held.next {
-                held.matches(cb.text().as_ref().map(|s| s.as_str()), &self.keys)
-            } else {
-                true
-            };
-            if !current { self.retained = None; }
+        if let Some(held) = &mut self.retained
+            && (now >= held.next || matches!(held.owner, Owner::Revision(_)))
+        {
+            if held.owner.lost(cb) { self.retained = None; }
             else if now >= held.next { held.next = now + WATCH; }
         }
         if let Some(own) = &self.own_pills
