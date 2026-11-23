@@ -322,6 +322,8 @@ impl RuntimeCore {
             { ran_other |= r && checks == self.frame.live_checks(); }
             if r { ran = true; why |= CommitWhy::DIRTY; }
         }
+        #[cfg(target_os = "linux")]
+        let primary_source = self.take_primary_source(app);
         let mut open_urls = std::mem::take(&mut tx.open_urls);
         self.latch_requests(app, &mut tx);
         // A handler asked for a menu: the hover it takes ends in this commit, not a frame later.
@@ -379,7 +381,7 @@ impl RuntimeCore {
         { self.frame.clear_live_check(); }
         // The release and a handler removing its field can land in the same frame.
         #[cfg(target_os = "linux")]
-        self.note_primary_selection(app);
+        if let Some(source) = primary_source { self.note_primary_selection(source); }
         tx.keep_on_screen.clear();
         for (path, v) in &mut self.commit.virtuals {
             if let Some(key) = v.reveal_selected.take() && !pointer_hover {

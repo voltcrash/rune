@@ -22,25 +22,37 @@ pub(crate) struct PrimarySelection {
     pub(crate) paste: Option<String>,
 }
 
+pub(in crate::runtime) enum PrimarySource {
+    Field(String),
+    Text(String),
+}
+
 impl RuntimeCore {
     /// The primary button came up.
     pub(in crate::runtime) fn primary_released(&mut self) {
         self.edit.primary.pending = true;
     }
 
-    /// After a frame's handlers, once the release's caret and selection landed: puts what's
-    /// selected on the primary selection, if it changed.
-    pub(in crate::runtime) fn note_primary_selection(&mut self, app: &dyn ViewDriver) {
-        if !std::mem::take(&mut self.edit.primary.pending) { return; }
-        let text = match self.focused_input() {
-            Some(input) => {
+    /// Holds the selection's source before a release handler's requested focus takes effect.
+    pub(in crate::runtime) fn take_primary_source(&mut self, app: &dyn ViewDriver) -> Option<PrimarySource> {
+        if !std::mem::take(&mut self.edit.primary.pending) { return None; }
+        if let Some(path) = self.kbd.focus.path() && self.input_at(path).is_some() {
+            return Some(PrimarySource::Field(path.to_owned()));
+        }
+        self.selected_text(app).map(PrimarySource::Text)
+    }
+
+    pub(in crate::runtime) fn note_primary_selection(&mut self, source: PrimarySource) {
+        let text = match source {
+            PrimarySource::Field(path) => {
+                let Some(input) = self.input_at(&path) else { return };
                 let edit = &input.edit;
                 let (start, end) = edit.range();
                 if edit.is_secure() || start == end { return; }
                 input.copy_text.as_ref().and_then(|f| f(edit, crate::CopyDestination::PrimarySelection))
                     .or_else(|| Some(edit.selected().to_owned())).filter(|t| !t.is_empty())
             }
-            None => self.selected_text(app),
+            PrimarySource::Text(text) => Some(text),
         };
         let Some(text) = text else { return };
         let hash = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(&text);

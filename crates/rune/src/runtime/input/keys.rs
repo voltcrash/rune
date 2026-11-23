@@ -290,7 +290,10 @@ impl RuntimeCore {
     }
 
     pub(in crate::runtime) fn focused_input(&self) -> Option<&InputSpec> {
-        let path = self.kbd.focus.path()?;
+        self.input_at(self.kbd.focus.path()?)
+    }
+
+    pub(super) fn input_at(&self, path: &str) -> Option<&InputSpec> {
         self.node(path).and_then(|n| n.input.as_deref()).or_else(|| self.commit.virtual_inputs.get(path).map(Box::as_ref))
     }
 

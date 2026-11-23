@@ -114,12 +114,24 @@ fn deleting_a_focused_row_does_not_call_its_stale_edit_accessor() {
             crate::text_input(edit, crate::TextStyle::new(14.0, 400.0))
                 .key(format!("row-{i}"))
                 .on_edit(crate::edit_access(move |s: &mut Vec<crate::TextEdit>| &mut s[i]))
-        })).child(el().key("delete").size(40.0, 40.0).on_press(|s: &mut Vec<crate::TextEdit>| { s.clear(); }))
+        })).child(el().key("redirect").size(40.0, 40.0).on_press_tx(|_: &mut Vec<crate::TextEdit>, tx| tx.focus("row-1", false)))
+        .child(el().key("delete").size(40.0, 40.0).on_press(|s: &mut Vec<crate::TextEdit>| { s.clear(); }))
     }
-    let mut edit = crate::TextEdit::default();
+    let mut edit = crate::TextEdit::new("source");
     edit.focused = true;
-    let mut rt = Runtime::new(vec![edit], view, (100.0, 100.0), Env::new(true, 1.0));
+    edit.set_selection(0, 6);
+    let mut other = crate::TextEdit::new("destination");
+    other.set_selection(0, 11);
+    let mut rt = Runtime::new(vec![edit, other], view, (100.0, 100.0), Env::new(true, 1.0));
     rt.frame(0.0);
+    #[cfg(target_os = "linux")]
+    {
+        let path = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("redirect")).unwrap().path.clone();
+        rt.frame.queue.push(Action::Press(path, crate::PointerButton::Primary, false));
+        rt.split_mut().0.primary_released();
+        rt.frame(0.0);
+        assert_eq!(rt.edit.primary.write.take().as_deref(), Some("source"));
+    }
     let path = rt.tree.nodes.iter().find(|n| n.key.as_deref() == Some("delete")).unwrap().path.clone();
     rt.frame.queue.push(Action::Press(path, crate::PointerButton::Primary, false));
     #[cfg(target_os = "linux")]
