@@ -151,7 +151,7 @@ fn walk_row_el<'a>(
     }
 }
 
-pub(super) fn offscreen_piece(t: &OffscreenText, range: Range<usize>, base: Option<&str>) -> SelectedText {
+pub(super) fn offscreen_piece(t: &OffscreenText, range: Range<usize>, base: Option<&str>, for_copy: bool) -> SelectedText {
     let path = match base {
         Some(b) if b == t.path => String::new(),
         Some(b) => t.path.strip_prefix(b).and_then(|p| p.strip_prefix('/')).unwrap_or(&t.path).to_owned(),
@@ -164,7 +164,7 @@ pub(super) fn offscreen_piece(t: &OffscreenText, range: Range<usize>, base: Opti
         trim_uncopied(&t.spec.cold.uncopied, (0, len))
     };
     let whole = !range.is_empty() && len > 0 && range.start <= full_a && range.end >= full_b;
-    let text = t.spec.copy_slice(range.start as u32, range.end as u32).unwrap_or_default();
+    let text = t.spec.selection_slice(range.start as u32, range.end as u32, for_copy).unwrap_or_default();
     let content = t.spec.content.get(range.clone()).unwrap_or_default().to_owned();
     SelectedText { path, key: t.key.clone(), range, len, whole, text, content }
 }

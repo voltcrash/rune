@@ -298,7 +298,7 @@ pub(super) fn with_renderer<R>(r: &Renderer, f: impl FnOnce() -> R) -> R {
 fn compute_base(r: &Renderer) -> (u64, u64) {
     let Renderer {
         s, highlights, reveal, streaming, tasks_read_only, selectable, scroll_wide, on_link, on_link_secondary,
-        link_look: _, link_help: _, link_ring: _, link_favicon: _, code_link: _,
+        link_look: _, link_help: _, link_copy: _, link_ring: _, link_favicon: _, code_link: _,
         highlighter: _, sources: _, next_source: _, tasks: _, next_task: _, on_task: _,
         #[cfg(feature = "mermaid")]
         diagram_frame: _,
@@ -417,7 +417,8 @@ impl Renderer {
             }
         }
         if let Some(ring) = &self.link_ring { ring(url).map(|(c, w)| (c, w.to_bits())).hash(h); }
-        if let Some(help) = &self.link_help { help(url).hash(h); }
+        self.link_help.as_ref().and_then(|help| help(url)).hash(h);
+        self.link_copy.as_ref().and_then(|copy| copy(url)).hash(h);
         if self.s.link_icon.is_some()
             && let Some(host) = super::link_icon::link_host(url)
             && host != "github.com"

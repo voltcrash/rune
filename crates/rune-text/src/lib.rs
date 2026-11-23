@@ -136,6 +136,7 @@ pub use layout::run::RunLayout;
 pub use layout::span::BareIcon;
 pub use layout::span::Ink;
 pub use layout::span::Link;
+pub use layout::span::LinkCopy;
 pub use layout::span::LinkPaint;
 #[doc(hidden)]
 pub use layout::span::PillChip;

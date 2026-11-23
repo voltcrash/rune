@@ -325,6 +325,50 @@ impl TextSpec {
         Some(out)
     }
 
+    pub(crate) fn selection_slice(&self, start: u32, end: u32, for_copy: bool) -> Option<String> {
+        if !for_copy || self.redacted || !self.cold.links.iter().any(|l| l.copy_text.is_some()) {
+            return self.copy_slice(start, end);
+        }
+        let mut hidden = Vec::<(u32, u32)>::new();
+        for &(a, b) in &self.cold.uncopied {
+            if let Some(last) = hidden.last_mut() && a <= last.1 { last.1 = last.1.max(b); }
+            else { hidden.push((a, b)); }
+        }
+        let mut edits: Vec<_> = self.cold.links.iter().filter_map(|link| {
+            let replacement = link.copy_text.as_deref()?;
+            let mut a = link.start;
+            let mut b = link.end;
+            if let Some(&(s, e)) = hidden.get(hidden.partition_point(|r| r.1 <= a)) && s <= a { a = e; }
+            if let Some(&(s, e)) = hidden[..hidden.partition_point(|r| r.0 < b)].last() && e >= b { b = s; }
+            (start <= a && a < b && b <= end && self.content.get(a as usize..b as usize).is_some())
+                .then_some((a, b, Some(replacement)))
+        }).collect();
+        if edits.is_empty() { return self.copy_slice(start, end); }
+        edits.extend(hidden.into_iter().filter(|r| r.1 > start && r.0 < end)
+            .map(|(a, b)| (a.max(start), b.min(end), None)));
+        edits.sort_by_key(|&(a, b, _)| (a, std::cmp::Reverse(b)));
+        let mut out = String::new();
+        let mut at = start;
+        let mut after_replacement = 0;
+        for (a, b, replacement) in edits {
+            if a >= at {
+                out.push_str(self.source_slice(at, a)?);
+                if let Some(copy) = replacement {
+                    if let Some(prefix) = &copy.prefix && out[after_replacement..].ends_with(prefix) {
+                        out.truncate(out.len() - prefix.len());
+                    }
+                    out.push_str(&copy.text);
+                    after_replacement = out.len();
+                }
+                at = b;
+            } else if replacement.is_none() {
+                at = at.max(b);
+            }
+        }
+        out.push_str(self.source_slice(at, end)?);
+        Some(out)
+    }
+
     /// Masks `self.content` in place and zeroizes the plain string (for layout of a hidden
     /// secure label or an exiting revealed one).
     pub(crate) fn conceal(&mut self) {

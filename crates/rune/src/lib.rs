@@ -347,6 +347,7 @@ pub use taskbar::TaskbarProgress;
 pub use text::FontSmoothing;
 pub use text::Icon;
 pub use text::Link;
+pub use text::LinkCopy;
 pub use text::LinkPaint;
 pub use text::SmoothingSupport;
 pub use text::Span;

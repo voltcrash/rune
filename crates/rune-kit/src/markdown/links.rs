@@ -5,6 +5,7 @@ use rune::PointerPress;
 pub(super) type LinkWire = (Rc<dyn Fn(El) -> El>, Option<std::any::TypeId>);
 pub(super) type LinkLook = Rc<dyn Fn(&str) -> Option<(Span, LinkPaint)>>;
 pub(super) type LinkRing = Rc<dyn Fn(&str) -> Option<(Color, f32)>>;
+pub(super) type LinkClipboard = Rc<dyn Fn(&str) -> Option<rune::LinkCopy>>;
 pub(super) type LinkHelp = Rc<dyn Fn(&str) -> Option<String>>;
 pub(super) type CodeLink = (Rc<dyn Fn(&str) -> Option<String>>, Color);
 
@@ -67,6 +68,12 @@ impl Markdown {
     /// Links without a background draw no resting ring; use [`Self::link_style`] to set one.
     pub fn link_ring(mut self, f: impl Fn(&str) -> Option<(Color, f32)> + 'static) -> Self {
         self.link_ring = Some(Rc::new(f));
+        self
+    }
+    /// Plain text for copying a complete interactive link by destination, such as its Markdown
+    /// reference. A partial selection or a link returning `None` copies its displayed text.
+    pub fn link_copy_text(mut self, f: impl Fn(&str) -> Option<rune::LinkCopy> + 'static) -> Self {
+        self.link_copy = Some(Rc::new(f));
         self
     }
     /// A tooltip for links by destination (`None`: none), shown after the hover delay while
@@ -152,7 +159,11 @@ impl Renderer {
             Some(c) => LinkPaint::new().underline(c.alpha(0.4)),
             None => hover(url),
         };
-        let e = inl.links.iter().fold(e, |e, (a, b, url)| e.link(Link::new(*a..*b, url.clone()).hover(hover_at(*a, *b, url)).help(help(url))));
+        let e = inl.links.iter().fold(e, |e, (a, b, url)| {
+            let mut link = Link::new(*a..*b, url.clone()).hover(hover_at(*a, *b, url)).help(help(url));
+            if let Some(text) = self.link_copy.as_ref().and_then(|f| f(url)) { link = link.copy_text(text); }
+            e.link(link)
+        });
         let e = match &self.on_link { Some((f, _)) => f(e), None => e };
         match &self.on_link_secondary { Some((f, _)) => f(e), None => e }
     }
