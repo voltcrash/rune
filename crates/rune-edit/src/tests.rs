@@ -433,6 +433,19 @@ fn history_deletion_cut_and_ime_are_atomic() {
 
 #[test]
 fn history_is_bounded_shared_and_cleared_after_send() {
+    let mut pill = TextEdit::new("");
+    pill.insert_pill("file", "File");
+    pill.undo();
+    assert!(pill.pills().next().is_none() && pill.retained_pill_ids().any(|id| id == "file"));
+    pill.redo();
+    pill.set_selection(0, pill.text.len());
+    pill.undo_group(|edit| {
+        edit.insert("");
+        assert!(edit.retained_pill_ids().any(|id| id == "file"));
+    });
+    assert!(pill.retained_pill_ids().any(|id| id == "file"));
+    for _ in 0..HISTORY_STEPS { pill.paste("x"); }
+    assert!(!pill.retained_pill_ids().any(|id| id == "file"));
     let mut e = TextEdit::new("");
     for _ in 0..HISTORY_STEPS + 12 { e.paste("é"); }
     let rendered = e.clone();
