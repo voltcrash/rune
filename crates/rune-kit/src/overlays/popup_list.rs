@@ -84,13 +84,14 @@ type CloseFn<S> = Rc<dyn Fn(&mut S)>;
 
 pub(super) trait PopupBind {
     fn bind_disabled_item(&self, item: El) -> El;
-    fn bind_item(&self, item: El, index: usize, id: String) -> El;
+    fn bind_item(&self, item: El, index: usize, id: String, active: bool) -> El;
     fn scrim(&self, key: String) -> Option<El>;
     fn bind_content(&self, content: El) -> El;
 }
 
 pub(super) struct PopupHandlers<S> {
     pub(super) on_active: Option<ActiveFn<S>>,
+    pub(super) on_point: Option<ActiveFn<S>>,
     pub(super) on_choose: Option<ChooseFn<S>>,
     pub(super) on_close: Option<CloseFn<S>>,
 }
@@ -100,10 +101,14 @@ impl<S: 'static> PopupBind for PopupHandlers<S> {
         item.on_press(|_: &mut S| {})
     }
 
-    fn bind_item(&self, mut item: El, index: usize, id: String) -> El {
+    fn bind_item(&self, mut item: El, index: usize, id: String, active: bool) -> El {
         if let Some(on_active) = &self.on_active {
             let on_active = on_active.clone();
             item = item.on_hover(move |s: &mut S| on_active(s, index));
+        }
+        if !active && let Some(on_point) = &self.on_point {
+            let on_point = on_point.clone();
+            item = item.on_pointer_move(move |s: &mut S, _| on_point(s, index));
         }
         if let Some(on_choose) = &self.on_choose {
             let on_choose = on_choose.clone();
@@ -201,7 +206,7 @@ impl PopupListCore {
             item = if option.disabled {
                 bind.bind_disabled_item(k.disabled_dim(item, true).disabled(true))
             } else {
-                bind.bind_item(item, i, id)
+                bind.bind_item(item, i, id, is_active)
             };
             rows = rows.child(item);
         }
@@ -279,7 +284,7 @@ impl<S: 'static> PopupList<S> {
     pub fn new(key: impl Into<String>, anchor: impl Into<String>) -> Self {
         Self {
             core: PopupListCore::new(key.into(), anchor.into()),
-            handlers: PopupHandlers { on_active: None, on_choose: None, on_close: None },
+            handlers: PopupHandlers { on_active: None, on_point: None, on_choose: None, on_close: None },
         }
     }
     pub fn anchor(mut self, anchor: impl Into<String>) -> Self { self.core.anchor = anchor.into(); self }
@@ -323,6 +328,9 @@ impl<S: 'static> PopupList<S> {
     pub fn empty_message(mut self, text: impl Into<String>) -> Self { self.core.empty = text.into(); self }
     pub fn label(mut self, label: impl Into<String>) -> Self { self.core.label = Some(label.into()); self }
     pub fn on_active(mut self, f: impl Fn(&mut S, usize) + 'static) -> Self { self.handlers.on_active = Some(Rc::new(f)); self }
+    /// Select an inactive option on pointer motion. A layout change under a resting pointer
+    /// leaves the active option alone, so async results can preserve keyboard navigation.
+    pub fn on_point(mut self, f: impl Fn(&mut S, usize) + 'static) -> Self { self.handlers.on_point = Some(Rc::new(f)); self }
     pub fn on_choose(mut self, f: impl Fn(&mut S, &str, &mut Tx) + 'static) -> Self { self.handlers.on_choose = Some(Rc::new(f)); self }
     pub fn on_close(mut self, f: impl Fn(&mut S) + 'static) -> Self { self.handlers.on_close = Some(Rc::new(f)); self }
 
