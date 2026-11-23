@@ -130,6 +130,8 @@ impl RuntimeCore {
     pub(super) fn frame_step(&mut self, app: &mut dyn AppDriver, elapsed: f64, catch_up: f64, dt: f64) -> bool {
         // Each queued action runs with its own input's arrival time; nothing else has one.
         let _input = crate::input::time::scope(None);
+        #[cfg(target_os = "linux")]
+        let primary_text = self.primary_text_before_handlers(app);
         self.interaction_frame_begins();
         let mut live_woke = self.take_live_wake();
         // Another window may have switched the font families since this one's last frame.
@@ -323,7 +325,7 @@ impl RuntimeCore {
             if r { ran = true; why |= CommitWhy::DIRTY; }
         }
         #[cfg(target_os = "linux")]
-        let primary_source = self.take_primary_source(app);
+        let primary_source = self.take_primary_source(primary_text);
         let mut open_urls = std::mem::take(&mut tx.open_urls);
         self.latch_requests(app, &mut tx);
         // A handler asked for a menu: the hover it takes ends in this commit, not a frame later.
@@ -381,7 +383,7 @@ impl RuntimeCore {
         { self.frame.clear_live_check(); }
         // The release and a handler removing its field can land in the same frame.
         #[cfg(target_os = "linux")]
-        if let Some(source) = primary_source { self.note_primary_selection(source); }
+        if let Some(source) = primary_source { self.note_primary_selection(app, source); }
         tx.keep_on_screen.clear();
         for (path, v) in &mut self.commit.virtuals {
             if let Some(key) = v.reveal_selected.take() && !pointer_hover {

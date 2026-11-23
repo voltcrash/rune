@@ -24,7 +24,7 @@ pub(crate) struct PrimarySelection {
 
 pub(in crate::runtime) enum PrimarySource {
     Field(String),
-    Text(String),
+    Text(Option<String>),
 }
 
 impl RuntimeCore {
@@ -33,16 +33,22 @@ impl RuntimeCore {
         self.edit.primary.pending = true;
     }
 
+    /// Unmounted rows must be read while their builder and the application model agree.
+    pub(in crate::runtime) fn primary_text_before_handlers(&self, app: &dyn ViewDriver) -> Option<String> {
+        if !self.edit.primary.pending || self.commit.dirty { return None; }
+        self.selected_text(app)
+    }
+
     /// Holds the selection's source before a release handler's requested focus takes effect.
-    pub(in crate::runtime) fn take_primary_source(&mut self, app: &dyn ViewDriver) -> Option<PrimarySource> {
+    pub(in crate::runtime) fn take_primary_source(&mut self, text: Option<String>) -> Option<PrimarySource> {
         if !std::mem::take(&mut self.edit.primary.pending) { return None; }
         if let Some(path) = self.kbd.focus.path() && self.input_at(path).is_some() {
             return Some(PrimarySource::Field(path.to_owned()));
         }
-        self.selected_text(app).map(PrimarySource::Text)
+        Some(PrimarySource::Text(text))
     }
 
-    pub(in crate::runtime) fn note_primary_selection(&mut self, source: PrimarySource) {
+    pub(in crate::runtime) fn note_primary_selection(&mut self, app: &dyn ViewDriver, source: PrimarySource) {
         let text = match source {
             PrimarySource::Field(path) => {
                 let Some(input) = self.input_at(&path) else { return };
@@ -52,7 +58,7 @@ impl RuntimeCore {
                 input.copy_text.as_ref().and_then(|f| f(edit, crate::CopyDestination::PrimarySelection))
                     .or_else(|| Some(edit.selected().to_owned())).filter(|t| !t.is_empty())
             }
-            PrimarySource::Text(text) => Some(text),
+            PrimarySource::Text(text) => text.or_else(|| self.selected_text(app)),
         };
         let Some(text) = text else { return };
         let hash = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(&text);
