@@ -142,6 +142,7 @@ impl Press {
 pub(crate) enum Secondary {
     #[default]
     Up,
+    Pointer { path: String, left: bool },
     Held { path: String, link: Option<usize>, left: bool },
 }
 
@@ -173,12 +174,12 @@ impl Tint {
 impl Secondary {
     pub(crate) fn path(&self) -> Option<&str> {
         match self {
-            Self::Held { path, .. } => Some(path),
+            Self::Pointer { path, .. } | Self::Held { path, .. } => Some(path),
             Self::Up => None,
         }
     }
 
-    pub(crate) fn is_held(&self) -> bool { matches!(self, Self::Held { .. }) }
+    pub(crate) fn is_held(&self) -> bool { !matches!(self, Self::Up) }
 }
 
 /// Pointer position, button capture, hover/tooltip tracking, touch, autoscroll, file drops and OS
@@ -289,7 +290,7 @@ impl PointerState {
     #[inline]
     pub(super) fn set_left(&mut self, out: bool) {
         if let Some(held) = self.press.held_mut() { held.left = out; }
-        if let Secondary::Held { left, .. } = &mut self.secondary { *left = out; }
+        if let Secondary::Held { left, .. } | Secondary::Pointer { left, .. } = &mut self.secondary { *left = out; }
     }
 
     /// The host moved its window by `(dx, dy)` points under a still pointer.

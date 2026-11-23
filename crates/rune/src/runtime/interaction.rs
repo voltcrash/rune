@@ -65,6 +65,7 @@ impl RuntimeCore {
         let (name, rank, path): (&'static str, u8, Option<&str>) = match action {
             Action::Press(p, ..) => ("on_press", 3, Some(p)),
             Action::DoublePress(p) => ("on_double_press", 3, Some(p)),
+            Action::SecondaryPointer(p, ..) => ("on_secondary_pointer", 2, Some(p)),
             Action::SecondaryPress(p, _) => ("on_secondary_press", 3, Some(p)),
             Action::MiddlePress(p) => ("on_middle_press", 3, Some(p)),
             Action::Link(p, ..) => ("on_link", 3, Some(p)),

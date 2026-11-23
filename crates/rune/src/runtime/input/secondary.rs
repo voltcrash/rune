@@ -22,7 +22,7 @@ impl RuntimeCore {
         loop {
             let n = &self.tree.nodes[index];
             if self.subtree_exiting(index) || !self.allowed(index) { break; }
-            if (physical && self.captures_secondary(index)) || n.handlers.on_secondary_press.is_some() || self.secondary_link_at(index, x, y).is_some() { return Some(&n.path); }
+            if (physical && (self.secondary_pointer_handler(index) || self.captures_secondary(index))) || n.handlers.on_secondary_press.is_some() || self.secondary_link_at(index, x, y).is_some() { return Some(&n.path); }
             // A text field's own menu (`field_menu`) wins over its ancestors'.
             if n.input.as_ref().is_some_and(|i| i.access.is_some()) { return Some(&n.path); }
             if text.is_none() && self.is_selectable(index) { text = Some(n.path.as_str()); }
@@ -30,6 +30,28 @@ impl RuntimeCore {
             index = p;
         }
         text
+    }
+
+    fn secondary_pointer_handler(&self, i: usize) -> bool {
+        self.tree.nodes[i].handlers.gestures.as_ref().is_some_and(|g| g.secondary_pointer.is_some())
+    }
+
+    pub(super) fn secondary_pointer_event(&mut self, phase: crate::PointerPhase, x: f32, y: f32) -> bool {
+        let capture::Secondary::Pointer { path, left } = self.pointer.secondary() else { return false };
+        let left = *left;
+        if let Some(i) = self.live_index(path) {
+            self.frame.queue.push(Action::SecondaryPointer(path.clone(), phase, self.pointer_event(i, x, y), self.kbd.held_mods));
+        }
+        if matches!(phase, crate::PointerPhase::Up | crate::PointerPhase::Cancel) {
+            self.pointer.clear_secondary();
+            self.pointer.release_tint(crate::PointerButton::Secondary);
+            if !self.pointer.press.is_held() { self.leave_after_release(left); }
+        }
+        true
+    }
+
+    pub(in crate::runtime) fn cancel_secondary_pointer(&mut self) {
+        if let Some((x, y)) = self.pointer.pos { self.secondary_pointer_event(crate::PointerPhase::Cancel, x, y); }
     }
 
     fn captures_secondary(&self, i: usize) -> bool {
@@ -56,6 +78,11 @@ impl RuntimeCore {
         self.dismiss_help();
         let path = self.secondary_target(x, y, physical).map(str::to_owned);
         let i = path.as_ref().and_then(|p| self.tree.nodes.iter().position(|n| n.path == *p));
+        if let Some(i) = i.filter(|&i| physical && self.secondary_pointer_handler(i)) {
+            self.pointer.set_secondary(capture::Secondary::Pointer { path: self.tree.nodes[i].path.clone(), left: false });
+            self.secondary_pointer_event(crate::PointerPhase::Down, x, y);
+            return;
+        }
         if let Some(i) = i.filter(|&i| physical && self.captures_secondary(i)) {
             if !self.pointer.press.is_held() { self.capture_button(i, x, y, crate::PointerButton::Secondary, None); }
             return;
@@ -89,6 +116,7 @@ impl RuntimeCore {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn secondary_claim(&self) -> &'static str {
         if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) { return "app"; }
+        if matches!(self.pointer.secondary(), capture::Secondary::Pointer { .. }) { return "app"; }
         let capture::Secondary::Held { path, link, .. } = self.pointer.secondary() else { return "" };
         let Some(n) = self.tree.nodes.iter().find(|n| n.path == *path) else { return "" };
         if link.is_some() || n.handlers.on_secondary_press.is_some() { return "app"; }
@@ -119,6 +147,7 @@ impl RuntimeCore {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline]
     pub(crate) fn secondary_abandon(&mut self) {
+        self.cancel_secondary_pointer();
         self.pointer.abandon_secondary();
         if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
             if !self.cancel_drag() { self.drop_press(); }
@@ -127,6 +156,11 @@ impl RuntimeCore {
     }
 
     pub(crate) fn secondary_up(&mut self, app: &dyn ViewDriver, x: f32, y: f32) {
+        if matches!(self.pointer.secondary(), capture::Secondary::Pointer { .. }) {
+            if self.pointer.pos != Some((x, y)) { self.move_pointer(app, x, y, true); }
+            self.secondary_pointer_event(crate::PointerPhase::Up, x, y);
+            return;
+        }
         if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
             self.pointer.release_tint(crate::PointerButton::Secondary);
             self.release_capture(app, x, y);
@@ -142,7 +176,7 @@ impl RuntimeCore {
         self.secondary_region_up(x, y);
         let (path, down_link, left) = match self.pointer.take_secondary() {
             capture::Secondary::Held { path, link, left } => (Some(path), link, left),
-            capture::Secondary::Up => (None, None, false),
+            capture::Secondary::Pointer { .. } | capture::Secondary::Up => (None, None, false),
         };
         if let Some(path) = path
             && self.secondary_target(x, y, physical) == Some(path.as_str())

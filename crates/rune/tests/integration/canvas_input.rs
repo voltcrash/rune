@@ -155,6 +155,46 @@ fn secondary_capture_keeps_each_events_position_and_modifiers() {
 }
 
 #[test]
+fn a_canvas_receives_secondary_edges_during_a_primary_drag() {
+    use rune::PointerPhase as P;
+    let mut rt = Runtime::new(Vec::new(), |_, _: &mut Cx<Vec<(P, PointerButton, f32, bool)>>| {
+        el().size(100., 80.)
+            .on_secondary_pointer(|s: &mut Vec<_>, phase, e, tx| s.push((phase, tx.button(), e.x, tx.mods().shift)))
+            .on_drag(|s: &mut Vec<_>, d, tx| {
+                let phase = match d.phase { Phase::Down => P::Down, Phase::Move => P::Move, Phase::Up => P::Up };
+                s.push((phase, tx.button(), d.x, d.mods.shift));
+            })
+    }, (200., 120.), Env::default());
+    rt.frame(0.);
+    rt.pointer_down(15., 25.);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods { shift: true, ..Mods::default() }));
+    rt.secondary_down(20., 25.);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.secondary_up(120., 25.);
+    rt.pointer_up(125., 25.);
+    rt.frame(0.);
+    assert!(rt.state.contains(&(P::Move, PointerButton::Secondary, 120., false)));
+    let edges: Vec<_> = rt.state.drain(..).filter(|(phase, ..)| *phase != P::Move).collect();
+    assert_eq!(edges, [(P::Down, PointerButton::Primary, 15., false),
+        (P::Down, PointerButton::Secondary, 20., true), (P::Up, PointerButton::Secondary, 120., false),
+        (P::Up, PointerButton::Primary, 125., false)]);
+
+    rt.secondary_down(20., 25.);
+    rt.pointer_down(15., 25.);
+    rt.pointer_up(30., 25.);
+    rt.frame(0.);
+    rt.window_focus(true);
+    rt.frame(0.);
+    rt.window_focus(false);
+    rt.frame(0.);
+    rt.secondary_up(30., 25.);
+    rt.frame(0.);
+    let edges: Vec<_> = rt.state.into_iter().filter(|(phase, ..)| *phase != P::Move).collect();
+    assert_eq!(edges, [(P::Down, PointerButton::Secondary, 20., false), (P::Down, PointerButton::Primary, 15., false),
+        (P::Up, PointerButton::Primary, 30., false), (P::Cancel, PointerButton::Secondary, 30., false)]);
+}
+
+#[test]
 fn the_middle_button_drags_only_elements_that_take_it() {
     let mut rt = app(S::default());
     // Over the canvas's child, the canvas takes the middle button.

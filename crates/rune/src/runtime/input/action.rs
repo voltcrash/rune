@@ -33,6 +33,7 @@ pub(in crate::runtime) enum Action {
     /// `El::on_link_secondary`: the text, its link and the press.
     LinkSecondary(String, usize, PointerEvent),
     SecondaryPress(String, PointerEvent),
+    SecondaryPointer(String, crate::PointerPhase, PointerEvent, crate::Mods),
     Drag(String, Drag, crate::PointerButton),
     /// A held press's drag hearing the pointer again (`Tx::drag_repeat_after`).
     DragRepeat(String, Drag, crate::PointerButton),
@@ -150,6 +151,7 @@ pub(in crate::runtime) fn live_only_handler(action: &Action) -> Option<&'static 
         Action::Link(..) => "on_link",
         Action::LinkSecondary(..) => "on_link_secondary",
         Action::SecondaryPress(..) => "on_secondary_press",
+        Action::SecondaryPointer(..) => "on_secondary_pointer",
         Action::Drag(..) | Action::DragRepeat(..) => "on_drag",
         Action::DragStart(_) => "on_drag_start",
         Action::DragEnd(..) => "on_drag_end",
@@ -167,7 +169,7 @@ pub(in crate::runtime) fn live_only_handler(action: &Action) -> Option<&'static 
 pub(in crate::runtime) fn action_path(action: &Action) -> Option<&str> {
     match action {
         Action::PointerMove(path, _) | Action::DrawnLayout(path, ..) | Action::Layout(path, _) | Action::Hover(path, _) | Action::HoverChange(path, _) | Action::SelectionChange(path, _) | Action::Press(path, ..) | Action::DoublePress(path) | Action::MiddlePress(path)
-        | Action::Link(path, ..) | Action::LinkSecondary(path, ..) | Action::SecondaryPress(path, _) | Action::Drag(path, ..) | Action::DragRepeat(path, ..) | Action::DragStart(path)
+        | Action::Link(path, ..) | Action::LinkSecondary(path, ..) | Action::SecondaryPointer(path, ..) | Action::SecondaryPress(path, _) | Action::Drag(path, ..) | Action::DragRepeat(path, ..) | Action::DragStart(path)
         | Action::DragEnd(path, _) | Action::Visible(path, _) => Some(path),
         Action::Wheel { chain, .. } | Action::Gesture(chain, _) => chain.first().map(String::as_str),
         _ => None,
@@ -452,6 +454,13 @@ impl RuntimeCore {
                 self.press_link(app, &path, k, &mut one)
             }
             Action::LinkSecondary(path, k, point) => self.secondary_press_link(app, &path, k, point, &mut one),
+            Action::SecondaryPointer(path, phase, point, mods) => {
+                let Some(f) = self.node(&path).and_then(|n| n.handlers.gestures.as_ref()?.secondary_pointer.clone()) else { return false };
+                one.mods = mods;
+                one.button = crate::PointerButton::Secondary;
+                f(app.states(), phase, point, &mut one);
+                true
+            }
             Action::SecondaryPress(path, point) => {
                 let Some(n) = self.node(&path).filter(|n| !self.is_exiting(n.id)) else { return false };
                 let Some(f) = n.handlers.on_secondary_press.clone() else { return false };
@@ -587,7 +596,7 @@ fn reads_text_layout(action: &Action) -> bool {
             Key::Modifier { .. } => false,
             _ => true,
         },
-        Action::Press(..) | Action::DoublePress(..) | Action::MiddlePress(..) | Action::SecondaryPress(..) | Action::Drag(..) | Action::DragStart(..) => true,
+        Action::Press(..) | Action::DoublePress(..) | Action::MiddlePress(..) | Action::SecondaryPress(..) | Action::SecondaryPointer(_, crate::PointerPhase::Down, ..) | Action::Drag(..) | Action::DragStart(..) => true,
         _ => false,
     }
 }
