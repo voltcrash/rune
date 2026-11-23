@@ -25,36 +25,46 @@
 +
 --- a/src/platform/linux/x11.rs
 +++ b/src/platform/linux/x11.rs
-@@ -54,0 +55,3 @@
-+
+@@ -55,0 +56,3 @@
 +mod outgoing;
 +use outgoing::Transfers;
-@@ -180 +183 @@
++
+@@ -91,0 +95 @@
++		ARBOARD_INCR_TIMEOUT,
+@@ -119 +123 @@
+-	conn: RustConnection,
++	conn: Arc<RustConnection>,
+@@ -174 +178 @@
+-		Ok(Self { conn, win_id })
++		Ok(Self { conn: Arc::new(conn), win_id })
+@@ -180 +184 @@
 -	data: RwLock<Option<Vec<ClipboardData>>>,
 +	data: RwLock<Option<(Vec<Arc<ClipboardData>>, Option<Arc<()>>)>>,
-@@ -248,0 +252 @@
+@@ -248,0 +253 @@
 +		owner: Option<Arc<()>>,
-@@ -259 +263 @@
+@@ -259 +264 @@
 -		*data_guard = Some(data);
 +		*data_guard = Some((data.into_iter().map(Arc::new).collect(), owner));
-@@ -309,2 +313,2 @@
+@@ -309,2 +314,2 @@
 -			if let Some(data_list) = &*data {
 -				for data in data_list {
 +			if let Some((data_list, _)) = &*data {
 +				for data in data_list.iter() {
-@@ -313 +317 @@
+@@ -313 +318 @@
 -							return Ok(data.clone());
 +							return Ok((**data).clone());
-@@ -601 +605 @@
+@@ -601 +606 @@
 -	fn handle_selection_request(&self, event: SelectionRequestEvent) -> Result<()> {
 +	fn handle_selection_request(&self, event: SelectionRequestEvent, transfers: &mut Transfers) -> Result<()> {
-@@ -616 +620 @@
+@@ -609,0 +615 @@
++		transfers.cancel(self, &event)?;
+@@ -616 +622 @@
 -			let (data_targets, excluded) = if let Some(data_list) = &*data {
 +			let (data_targets, excluded) = if let Some((data_list, _)) = &*data {
-@@ -621 +625 @@
+@@ -621 +627 @@
 -				for data in data_list {
 +				for data in data_list.iter() {
-@@ -671,16 +675,14 @@
+@@ -671,16 +677,14 @@
 -			if let Some(data_list) = &*data {
 -				success = match data_list.iter().find(|d| d.format == event.target) {
 -					Some(data) => {
@@ -85,19 +95,23 @@
 +							false
 +						}
 +					},
-@@ -738 +740 @@
+@@ -738 +742 @@
 -			Some(data) => {
 +			Some((data, _)) => {
-@@ -826,0 +829 @@
+@@ -826,0 +831 @@
 +	let mut transfers = Transfers::default();
-@@ -829,2 +832,2 @@
+@@ -829,2 +834,2 @@
 -		match context.server.conn.wait_for_event().map_err(into_unknown)? {
 -			Event::DestroyNotify(_) => {
 +		let served = match context.server.conn.wait_for_event().map_err(into_unknown)? {
 +			Event::DestroyNotify(event) if event.window == context.server.win_id => {
-@@ -834,0 +838,10 @@
+@@ -834,0 +840,14 @@
 +			Event::DestroyNotify(event) => {
 +				transfers.forget_window(event.window);
++				continue;
++			}
++			Event::ClientMessage(event) if event.type_ == context.atoms.ARBOARD_INCR_TIMEOUT => {
++				transfers.expire(&context)?;
 +				continue;
 +			}
 +			Event::PropertyNotify(event) if event.state == Property::DELETE => {
@@ -106,7 +120,7 @@
 +					None => continue,
 +				}
 +			}
-@@ -836,7 +849,2 @@
+@@ -836,7 +855,2 @@
 -				// TODO: check if this works
 -				// Someone else has new content in the clipboard, so it is
 -				// notifying us that we should delete our data now.
@@ -116,17 +130,17 @@
 -					let selection = context.selection_of(selection);
 +				if let Some(kind) = context.kind_of(event.selection) {
 +					let selection = context.selection_of(kind);
-@@ -843,0 +852,4 @@
+@@ -843,0 +858,4 @@
 +					// We may have reclaimed the window's selection before processing this event.
 +					if context.is_owner(kind)? {
 +						continue;
 +					}
-@@ -856,0 +869 @@
+@@ -856,0 +875 @@
 +				continue;
-@@ -865 +878 @@
+@@ -865 +884 @@
 -				if let Err(e) = context.handle_selection_request(event) {
 +				if let Err(e) = context.handle_selection_request(event, &mut transfers) {
-@@ -870,26 +883,4 @@
+@@ -870,26 +889,4 @@
 -				if let Some(selection) = context.kind_of(event.selection) {
 -					let selection = context.selection_of(selection);
 -
@@ -157,7 +171,7 @@
 +					continue;
 +				}
 +				event
-@@ -924,4 +915,28 @@
+@@ -924,4 +921,28 @@
 -			}
 -			_event => {
 -				// May be useful for debugging but nothing else really.
@@ -190,7 +204,7 @@
 +				if notified {
 +					handover_finished(&context, handover_state);
 +				}
-@@ -996,0 +1012,11 @@
+@@ -996,0 +1018,11 @@
 +		self.set_text_with_owner(message, selection, wait, exclude_from_history, None)
 +	}
 +
@@ -202,19 +216,19 @@
 +		exclude_from_history: bool,
 +		owner: Option<Arc<()>>,
 +	) -> Result<()> {
-@@ -1005 +1031 @@
+@@ -1005 +1037 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, owner)
-@@ -1043 +1069 @@
+@@ -1043 +1075 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, None)
-@@ -1079 +1105 @@
+@@ -1079 +1111 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, None)
-@@ -1101 +1127 @@
+@@ -1101 +1133 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, None)
-@@ -1200,0 +1227,36 @@
+@@ -1200,0 +1233,77 @@
 +
 +#[cfg(test)]
 +mod ownership_tests {
@@ -250,22 +264,69 @@
 +		assert_eq!(result.unwrap(), b"second");
 +		assert!(retained.upgrade().is_some());
 +	}
++
++	#[test]
++	#[ignore = "takes ownership of the clipboard on an isolated X11 display"]
++	fn abandoned_incremental_paste_releases_bytes_and_window_subscription() {
++		let ctx = Arc::new(Inner::new().unwrap());
++		let reader = XContext::new().unwrap();
++		let kind = LinuxClipboardKind::Clipboard;
++		let property = ctx.atoms.ARBOARD_CLIPBOARD;
++		reader.conn.change_window_attributes(reader.win_id, &x11rb::protocol::xproto::ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT))
++			.unwrap().check().unwrap();
++		let data = ClipboardData {
++			bytes: vec![17; 1024 * 1024],
++			format: ctx.atoms.UTF8_STRING,
++		};
++		ctx.write(vec![data], kind, WaitConfig::None, None).unwrap();
++		let old = Arc::downgrade(&ctx.selection_of(kind).data.read().as_ref().unwrap().0[0]);
++		let server = std::thread::spawn({
++			let ctx = ctx.clone();
++			move || serve_requests(ctx).unwrap()
++		});
++		reader.conn.convert_selection(reader.win_id, ctx.atom_of(kind), ctx.atoms.UTF8_STRING, property, Time::CURRENT_TIME)
++			.unwrap().check().unwrap();
++		assert!(matches!(reader.conn.wait_for_event().unwrap(), Event::SelectionNotify(e) if e.property == property));
++		let header = reader.conn.get_property(false, reader.win_id, property, AtomEnum::ANY, 0, 1).unwrap().reply().unwrap();
++		assert_eq!(header.type_, ctx.atoms.INCR);
++		ctx.write(Vec::new(), kind, WaitConfig::None, None).unwrap();
++		assert!(old.upgrade().is_some());
++
++		// Keep the requestor alive without deleting its property or generating further X events.
++		let limit = Instant::now() + Duration::from_secs(10);
++		loop {
++			let attrs = reader.conn.get_window_attributes(reader.win_id).unwrap().reply().unwrap();
++			if old.strong_count() == 0 && attrs.all_event_masks == EventMask::NO_EVENT {
++				break;
++			}
++			assert!(Instant::now() < limit, "idle transfer retained its data or subscription");
++			std::thread::sleep(Duration::from_millis(10));
++		}
++		ctx.server.conn.destroy_window(ctx.server.win_id).unwrap().check().unwrap();
++		server.join().unwrap();
++	}
 +}
 --- /dev/null
 +++ b/src/platform/linux/x11/outgoing.rs
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,185 @@
 +// SPDX-License-Identifier: Apache-2.0 OR MIT
 +use super::*;
-+use x11rb::protocol::xproto::{ChangeWindowAttributesAux, Window};
++use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ClientMessageEvent, Window};
 +
 +struct Transfer {
 +	request: SelectionRequestEvent,
 +	data: Arc<ClipboardData>,
 +	offset: usize,
++	deadline: Instant,
 +}
 +
 +#[derive(Default)]
-+pub(super) struct Transfers(HashMap<(Window, Atom), Transfer>);
++pub(super) struct Transfers {
++	entries: HashMap<(Window, Atom), Transfer>,
++	alarm_pending: bool,
++}
++
++const TRANSFER_IDLE: Duration = Duration::from_secs(5);
 +
 +impl Transfers {
 +	fn chunk_size(ctx: &Inner) -> usize {
@@ -274,7 +335,7 @@
 +	}
 +
 +	pub(super) fn pending(&self, request: &SelectionRequestEvent) -> bool {
-+		self.0.contains_key(&(request.requestor, request.property))
++		self.entries.contains_key(&(request.requestor, request.property))
 +	}
 +
 +	pub(super) fn send(
@@ -305,14 +366,94 @@
 +			.check()
 +			.map_err(into_unknown)?;
 +		let len = u32::try_from(data.bytes.len()).unwrap_or(u32::MAX);
-+		conn.change_property32(PropMode::REPLACE, window, request.property, ctx.atoms.INCR, &[len])
++		let header = conn
++			.change_property32(PropMode::REPLACE, window, request.property, ctx.atoms.INCR, &[len])
 +			.map_err(into_unknown)?
 +			.check()
-+			.map_err(into_unknown)?;
-+		self.0.insert(
++			.map_err(into_unknown);
++		if let Err(error) = header {
++			self.unsubscribe_unused(ctx, window)?;
++			return Err(error);
++		}
++		self.entries.insert(
 +			(window, request.property),
-+			Transfer { request, data: data.clone(), offset: 0 },
++			Transfer {
++				request,
++				data: data.clone(),
++				offset: 0,
++				deadline: Instant::now() + TRANSFER_IDLE,
++			},
 +		);
++		if let Err(error) = self.arm(ctx) {
++			self.cancel(ctx, &request)?;
++			return Err(error);
++		}
++		Ok(())
++	}
++
++	pub(super) fn cancel(&mut self, ctx: &Inner, request: &SelectionRequestEvent) -> Result<()> {
++		if self.entries.remove(&(request.requestor, request.property)).is_some() {
++			self.unsubscribe_unused(ctx, request.requestor)?;
++		}
++		Ok(())
++	}
++
++	fn arm(&mut self, ctx: &Inner) -> Result<()> {
++		if self.alarm_pending {
++			return Ok(());
++		}
++		let Some(deadline) = self.entries.values().map(|entry| entry.deadline).min() else {
++			return Ok(());
++		};
++		let conn = Arc::downgrade(&ctx.server.conn);
++		let window = ctx.server.win_id;
++		let atom = ctx.atoms.ARBOARD_INCR_TIMEOUT;
++		// Wake wait_for_event even if a still-mounted requestor stops reading.
++		std::thread::Builder::new()
++			.name("arboard-incr-timeout".into())
++			.spawn(move || {
++				std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
++				if let Some(conn) = conn.upgrade() {
++					let wake = ClientMessageEvent::new(32, window, atom, [0; 5]);
++					let _ = conn.send_event(false, window, EventMask::NO_EVENT, wake);
++					let _ = conn.flush();
++				}
++			})
++			.map_err(into_unknown)?;
++		self.alarm_pending = true;
++		Ok(())
++	}
++
++	pub(super) fn expire(&mut self, ctx: &Inner) -> Result<()> {
++		self.alarm_pending = false;
++		let now = Instant::now();
++		let mut expired = Vec::new();
++		self.entries.retain(|&(window, _), entry| {
++			if entry.deadline > now {
++				return true;
++			}
++			expired.push(window);
++			false
++		});
++		expired.sort_unstable();
++		expired.dedup();
++		for window in expired {
++			self.unsubscribe_unused(ctx, window)?;
++		}
++		ctx.server.conn.flush().map_err(into_unknown)?;
++		self.arm(ctx)
++	}
++
++	fn unsubscribe_unused(&self, ctx: &Inner, window: Window) -> Result<()> {
++		if window != ctx.server.win_id && !self.entries.keys().any(|(w, _)| *w == window) {
++			ctx.server
++				.conn
++				.change_window_attributes(
++					window,
++					&ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT),
++				)
++				.map_err(into_unknown)?;
++		}
 +		Ok(())
 +	}
 +
@@ -321,7 +462,7 @@
 +		ctx: &Inner,
 +		event: PropertyNotifyEvent,
 +	) -> Result<Option<SelectionRequestEvent>> {
-+		let Entry::Occupied(mut entry) = self.0.entry((event.window, event.atom)) else {
++		let Entry::Occupied(mut entry) = self.entries.entry((event.window, event.atom)) else {
 +			return Ok(None);
 +		};
 +		let transfer = entry.get_mut();
@@ -337,17 +478,10 @@
 +		)
 +		.map_err(into_unknown)?;
 +		transfer.offset = end;
++		transfer.deadline = Instant::now() + TRANSFER_IDLE;
 +		let completed = if bytes.is_empty() {
 +			let request = entry.remove().request;
-+			if event.window != ctx.server.win_id
-+				&& !self.0.keys().any(|(window, _)| *window == event.window)
-+			{
-+				conn.change_window_attributes(
-+					event.window,
-+					&ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT),
-+				)
-+				.map_err(into_unknown)?;
-+			}
++			self.unsubscribe_unused(ctx, event.window)?;
 +			Some(request)
 +		} else {
 +			None
@@ -357,6 +491,6 @@
 +	}
 +
 +	pub(super) fn forget_window(&mut self, window: Window) {
-+		self.0.retain(|(requestor, _), _| *requestor != window);
++		self.entries.retain(|(requestor, _), _| *requestor != window);
 +	}
 +}

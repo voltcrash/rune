@@ -233,11 +233,16 @@ pub(super) fn serve(
         )?);
     }
     queue.roundtrip(&mut state)?;
-    if !state.devices.iter().any(|device| device.publishing) {
-        return Err("no active Wayland device accepted the selection".into());
-    }
+    let result = if state.devices.iter().any(|device| device.publishing) {
+        Ok(())
+    } else {
+        state.owner = None;
+        Err("no active Wayland device accepted the selection".into())
+    };
     WaylandSource::new(conn, queue).insert(event_loop.handle())?;
-    ready.send(Ok(()))?;
+    if ready.send(result).is_err() {
+        state.closed = true;
+    }
     while state.owner.is_some() && !state.closed {
         event_loop.dispatch(None, &mut state)?;
     }

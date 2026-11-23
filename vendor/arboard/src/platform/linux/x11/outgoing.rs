@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 use super::*;
-use x11rb::protocol::xproto::{ChangeWindowAttributesAux, Window};
+use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ClientMessageEvent, Window};
 
 struct Transfer {
 	request: SelectionRequestEvent,
 	data: Arc<ClipboardData>,
 	offset: usize,
+	deadline: Instant,
 }
 
 #[derive(Default)]
-pub(super) struct Transfers(HashMap<(Window, Atom), Transfer>);
+pub(super) struct Transfers {
+	entries: HashMap<(Window, Atom), Transfer>,
+	alarm_pending: bool,
+}
+
+const TRANSFER_IDLE: Duration = Duration::from_secs(5);
 
 impl Transfers {
 	fn chunk_size(ctx: &Inner) -> usize {
@@ -18,7 +24,7 @@ impl Transfers {
 	}
 
 	pub(super) fn pending(&self, request: &SelectionRequestEvent) -> bool {
-		self.0.contains_key(&(request.requestor, request.property))
+		self.entries.contains_key(&(request.requestor, request.property))
 	}
 
 	pub(super) fn send(
@@ -49,14 +55,94 @@ impl Transfers {
 			.check()
 			.map_err(into_unknown)?;
 		let len = u32::try_from(data.bytes.len()).unwrap_or(u32::MAX);
-		conn.change_property32(PropMode::REPLACE, window, request.property, ctx.atoms.INCR, &[len])
+		let header = conn
+			.change_property32(PropMode::REPLACE, window, request.property, ctx.atoms.INCR, &[len])
 			.map_err(into_unknown)?
 			.check()
-			.map_err(into_unknown)?;
-		self.0.insert(
+			.map_err(into_unknown);
+		if let Err(error) = header {
+			self.unsubscribe_unused(ctx, window)?;
+			return Err(error);
+		}
+		self.entries.insert(
 			(window, request.property),
-			Transfer { request, data: data.clone(), offset: 0 },
+			Transfer {
+				request,
+				data: data.clone(),
+				offset: 0,
+				deadline: Instant::now() + TRANSFER_IDLE,
+			},
 		);
+		if let Err(error) = self.arm(ctx) {
+			self.cancel(ctx, &request)?;
+			return Err(error);
+		}
+		Ok(())
+	}
+
+	pub(super) fn cancel(&mut self, ctx: &Inner, request: &SelectionRequestEvent) -> Result<()> {
+		if self.entries.remove(&(request.requestor, request.property)).is_some() {
+			self.unsubscribe_unused(ctx, request.requestor)?;
+		}
+		Ok(())
+	}
+
+	fn arm(&mut self, ctx: &Inner) -> Result<()> {
+		if self.alarm_pending {
+			return Ok(());
+		}
+		let Some(deadline) = self.entries.values().map(|entry| entry.deadline).min() else {
+			return Ok(());
+		};
+		let conn = Arc::downgrade(&ctx.server.conn);
+		let window = ctx.server.win_id;
+		let atom = ctx.atoms.ARBOARD_INCR_TIMEOUT;
+		// Wake wait_for_event even if a still-mounted requestor stops reading.
+		std::thread::Builder::new()
+			.name("arboard-incr-timeout".into())
+			.spawn(move || {
+				std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+				if let Some(conn) = conn.upgrade() {
+					let wake = ClientMessageEvent::new(32, window, atom, [0; 5]);
+					let _ = conn.send_event(false, window, EventMask::NO_EVENT, wake);
+					let _ = conn.flush();
+				}
+			})
+			.map_err(into_unknown)?;
+		self.alarm_pending = true;
+		Ok(())
+	}
+
+	pub(super) fn expire(&mut self, ctx: &Inner) -> Result<()> {
+		self.alarm_pending = false;
+		let now = Instant::now();
+		let mut expired = Vec::new();
+		self.entries.retain(|&(window, _), entry| {
+			if entry.deadline > now {
+				return true;
+			}
+			expired.push(window);
+			false
+		});
+		expired.sort_unstable();
+		expired.dedup();
+		for window in expired {
+			self.unsubscribe_unused(ctx, window)?;
+		}
+		ctx.server.conn.flush().map_err(into_unknown)?;
+		self.arm(ctx)
+	}
+
+	fn unsubscribe_unused(&self, ctx: &Inner, window: Window) -> Result<()> {
+		if window != ctx.server.win_id && !self.entries.keys().any(|(w, _)| *w == window) {
+			ctx.server
+				.conn
+				.change_window_attributes(
+					window,
+					&ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT),
+				)
+				.map_err(into_unknown)?;
+		}
 		Ok(())
 	}
 
@@ -65,7 +151,7 @@ impl Transfers {
 		ctx: &Inner,
 		event: PropertyNotifyEvent,
 	) -> Result<Option<SelectionRequestEvent>> {
-		let Entry::Occupied(mut entry) = self.0.entry((event.window, event.atom)) else {
+		let Entry::Occupied(mut entry) = self.entries.entry((event.window, event.atom)) else {
 			return Ok(None);
 		};
 		let transfer = entry.get_mut();
@@ -81,17 +167,10 @@ impl Transfers {
 		)
 		.map_err(into_unknown)?;
 		transfer.offset = end;
+		transfer.deadline = Instant::now() + TRANSFER_IDLE;
 		let completed = if bytes.is_empty() {
 			let request = entry.remove().request;
-			if event.window != ctx.server.win_id
-				&& !self.0.keys().any(|(window, _)| *window == event.window)
-			{
-				conn.change_window_attributes(
-					event.window,
-					&ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT),
-				)
-				.map_err(into_unknown)?;
-			}
+			self.unsubscribe_unused(ctx, event.window)?;
 			Some(request)
 		} else {
 			None
@@ -101,6 +180,6 @@ impl Transfers {
 	}
 
 	pub(super) fn forget_window(&mut self, window: Window) {
-		self.0.retain(|(requestor, _), _| *requestor != window);
+		self.entries.retain(|(requestor, _), _| *requestor != window);
 	}
 }

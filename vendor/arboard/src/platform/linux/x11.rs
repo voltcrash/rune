@@ -92,6 +92,7 @@ x11rb::atom_manager! {
 		// This is just some random name for the property on our window, into which
 		// the clipboard owner writes the data we requested.
 		ARBOARD_CLIPBOARD,
+		ARBOARD_INCR_TIMEOUT,
 	}
 }
 
@@ -119,7 +120,7 @@ struct GlobalClipboard {
 }
 
 struct XContext {
-	conn: RustConnection,
+	conn: Arc<RustConnection>,
 	win_id: u32,
 }
 
@@ -174,7 +175,7 @@ impl XContext {
 		.map_err(into_unknown)?;
 		conn.flush().map_err(into_unknown)?;
 
-		Ok(Self { conn, win_id })
+		Ok(Self { conn: Arc::new(conn), win_id })
 	}
 }
 
@@ -611,6 +612,7 @@ impl Inner {
 			}
 		};
 
+		transfers.cancel(self, &event)?;
 		let success;
 		// we are asked for a list of supported conversion targets
 		if event.target == self.atoms.TARGETS {
@@ -837,6 +839,10 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 			}
 			Event::DestroyNotify(event) => {
 				transfers.forget_window(event.window);
+				continue;
+			}
+			Event::ClientMessage(event) if event.type_ == context.atoms.ARBOARD_INCR_TIMEOUT => {
+				transfers.expire(&context)?;
 				continue;
 			}
 			Event::PropertyNotify(event) if event.state == Property::DELETE => {
@@ -1258,5 +1264,46 @@ mod ownership_tests {
 		server.join().unwrap();
 		assert_eq!(result.unwrap(), b"second");
 		assert!(retained.upgrade().is_some());
+	}
+
+	#[test]
+	#[ignore = "takes ownership of the clipboard on an isolated X11 display"]
+	fn abandoned_incremental_paste_releases_bytes_and_window_subscription() {
+		let ctx = Arc::new(Inner::new().unwrap());
+		let reader = XContext::new().unwrap();
+		let kind = LinuxClipboardKind::Clipboard;
+		let property = ctx.atoms.ARBOARD_CLIPBOARD;
+		reader.conn.change_window_attributes(reader.win_id, &x11rb::protocol::xproto::ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT))
+			.unwrap().check().unwrap();
+		let data = ClipboardData {
+			bytes: vec![17; 1024 * 1024],
+			format: ctx.atoms.UTF8_STRING,
+		};
+		ctx.write(vec![data], kind, WaitConfig::None, None).unwrap();
+		let old = Arc::downgrade(&ctx.selection_of(kind).data.read().as_ref().unwrap().0[0]);
+		let server = std::thread::spawn({
+			let ctx = ctx.clone();
+			move || serve_requests(ctx).unwrap()
+		});
+		reader.conn.convert_selection(reader.win_id, ctx.atom_of(kind), ctx.atoms.UTF8_STRING, property, Time::CURRENT_TIME)
+			.unwrap().check().unwrap();
+		assert!(matches!(reader.conn.wait_for_event().unwrap(), Event::SelectionNotify(e) if e.property == property));
+		let header = reader.conn.get_property(false, reader.win_id, property, AtomEnum::ANY, 0, 1).unwrap().reply().unwrap();
+		assert_eq!(header.type_, ctx.atoms.INCR);
+		ctx.write(Vec::new(), kind, WaitConfig::None, None).unwrap();
+		assert!(old.upgrade().is_some());
+
+		// Keep the requestor alive without deleting its property or generating further X events.
+		let limit = Instant::now() + Duration::from_secs(10);
+		loop {
+			let attrs = reader.conn.get_window_attributes(reader.win_id).unwrap().reply().unwrap();
+			if old.strong_count() == 0 && attrs.all_event_masks == EventMask::NO_EVENT {
+				break;
+			}
+			assert!(Instant::now() < limit, "idle transfer retained its data or subscription");
+			std::thread::sleep(Duration::from_millis(10));
+		}
+		ctx.server.conn.destroy_window(ctx.server.win_id).unwrap().check().unwrap();
+		server.join().unwrap();
 	}
 }
