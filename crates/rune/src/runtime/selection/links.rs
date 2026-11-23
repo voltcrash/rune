@@ -228,6 +228,22 @@ impl RuntimeCore {
             .find(|(_, r)| contains(*r, x, y)).map(|(k, _)| k)
     }
 
+    pub(in crate::runtime) fn link_selection_focus(&self, path: &str) -> Option<usize> {
+        let selection = self.edit.selectable.phase.selection()?;
+        let focus_path = selection.far.as_ref().map_or(&selection.path, |far| &far.path);
+        (focus_path == path).then_some(selection.focus)
+    }
+
+    /// Link presses break the paragraph's click sequence. A copyable link can anchor or extend a drag.
+    pub(in crate::runtime) fn selection_clicks(&mut self, i: usize, x: f32, y: f32) -> Option<u32> {
+        if let Some(k) = self.link_at(i, x, y) {
+            self.edit.selectable.presses.clear();
+            return self.tree.nodes[i].text.as_ref()?.cold.links[k].copy_text.as_ref().map(|_| 1);
+        }
+        let now = self.now_clock();
+        Some(self.edit.selectable.presses.press(&self.tree.nodes[i].path, now, (x, y), self.double_click_interval).min(3))
+    }
+
     /// The id of the `Mark::Pill` in text field `i` under window point `(x, y)`, if any.
     pub(in crate::runtime) fn input_pill_at(&self, i: usize, x: f32, y: f32) -> Option<String> {
         let n = &self.tree.nodes[i];

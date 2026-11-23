@@ -96,6 +96,84 @@ fn a_whole_file_link_copies_its_reference_inside_a_paragraph() {
 }
 
 #[test]
+fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
+    #[derive(Default)]
+    struct Page { editor: rune::TextEdit, opened: usize, inset: f32 }
+    let mut rt = Runtime::new(Page::default(), |s, _| col().pl(s.inset)
+        .child(Markdown::new("[main.rs](src/main.rs) [i](tiny)rest").selectable(true)
+            .link_copy_text(|href| Some(rune::LinkCopy::new(format!("[main.rs]({href})"))))
+            .on_link(|s: &mut Page, _| s.opened += 1).build(&Kit::neutral(true)).key("reply"))
+        .child(rune::text_input(&s.editor, rune::TextStyle::new(14., 400.)).key("editor")
+            .on_edit(rune::edit_access(|s: &mut Page| &mut s.editor))), (360., 140.), Env::new(true, 1.));
+    rt.frame(0.);
+    let clipboard = rune::clipboard::memory();
+    rt.use_clipboard(&clipboard);
+    rt.update(|_, tx| tx.focus("editor", false));
+    rt.frame(0.);
+    let link = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("src/main.rs")).unwrap();
+    let [x, y, w, h] = link.rect;
+    let (left, right, cy) = (x + 0.5, x + w - 0.5, y + h / 2.);
+    rt.pointer_down(left, cy);
+    rt.pointer_move(right, cy);
+    rt.pointer_up(right, cy);
+    rt.frame(0.);
+    assert_eq!(rt.selected_text().as_deref(), Some("main.rs"));
+    assert_eq!(rt.state.opened, 0);
+    rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+    for _ in 0..4 { rt.frame(1. / 60.); }
+    assert_eq!(clipboard.text().as_deref().map(String::as_str), Some("[main.rs](src/main.rs)"));
+    rt.pointer_down(left, cy);
+    rt.pointer_up(left, cy);
+    rt.frame(0.);
+    assert_eq!(rt.state.opened, 1);
+    rt.update(|_, tx| tx.focus("editor", false));
+    rt.frame(0.);
+    let tiny = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("tiny")).unwrap().rect;
+    let mid = tiny[0] + tiny[2] / 2.;
+    rt.pointer_down(mid - 1., cy);
+    rt.pointer_move(mid + 1., cy);
+    rt.pointer_up(mid + 1., cy);
+    rt.frame(0.);
+    assert_eq!(rt.selected_text().as_deref(), Some("i"));
+    assert_eq!(rt.state.opened, 1, "a two-point drag selected the narrow glyph");
+    rt.key(KeyEvent { key: Key::Command('c'), mods: Mods { cmd: true, ..Mods::default() } });
+    for _ in 0..4 { rt.frame(1. / 60.); }
+    assert_eq!(clipboard.text().as_deref().map(String::as_str), Some("[main.rs](tiny)"));
+    let edge = tiny[0] + tiny[2];
+    rt.pointer_down(edge - 0.5, cy);
+    rt.pointer_up(edge - 0.5, cy);
+    rt.frame(0.);
+    rt.pointer_down(edge + 1., cy);
+    rt.pointer_up(edge + 1., cy);
+    rt.frame(0.);
+    assert!(rt.selected_text().is_none(), "clicking a link does not begin a text double-click");
+    rt.update(|_, tx| tx.select_text("reply/b0", 0..1));
+    rt.frame(0.);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods { shift: true, ..Mods::default() }));
+    rt.pointer_down(mid - 1., cy);
+    rt.pointer_move(mid + 1., cy);
+    rt.pointer_up(mid + 1., cy);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.frame(0.);
+    assert_eq!(rt.selected_text().as_deref(), Some("main.rs i"), "Shift-drag extends the original anchor");
+    assert_eq!(rt.state.opened, 2);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods { shift: true, ..Mods::default() }));
+    rt.pointer_down(right - 1., cy);
+    rt.pointer_move(right - 0.8, cy);
+    rt.pointer_up(right - 0.8, cy);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.frame(0.);
+    assert_eq!(rt.state.opened, 3, "small pointer motion within the same caret still clicks");
+    let middle = (left + right) / 2.;
+    rt.pointer_down(middle, cy);
+    rt.update(|s, tx| { s.inset = 8.; tx.instant(); });
+    rt.frame(0.);
+    rt.pointer_up(middle, cy);
+    rt.frame(0.);
+    assert_eq!(rt.state.opened, 4, "layout movement during a stationary click is not a drag");
+}
+
+#[test]
 fn a_cached_link_can_replace_its_tooltip_with_clipboard_text() {
     let mut rt = Runtime::new(false, |copying, _| {
         let md = Markdown::new("[label](target)").selectable(true).on_link(|_: &mut bool, _| {});

@@ -335,6 +335,7 @@ impl RuntimeCore {
             self.frame.queue.push(Action::Press(path.clone(), crate::PointerButton::Primary, false));
         }
         let mut held = capture::Held::new(path, d, crate::PointerButton::Primary, (x, y), now, second, drag_out).on_link(link).pressed_on_down(on_down);
+        held.link_focus = link.and_then(|_| self.link_selection_focus(&held.path));
         held.touch = touch;
         self.pointer.press.hold(held);
     }
@@ -427,7 +428,13 @@ impl RuntimeCore {
             let [lx, ly] = self.to_local(i, x, y);
             self.frame.queue.push(Action::Drag(path.clone(), Drag { phase: Phase::Up, mods: self.kbd.held_mods, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d }, button));
         }
-        if let Some(k) = link.filter(|_| inside) { self.link_up(&path, k, x, y, button); }
+        if let Some(k) = link {
+            if selected && self.focused_input().is_some() {
+                self.frame.queue.push(Action::Blur);
+            } else if inside && !selected {
+                self.link_up(&path, k, x, y, button);
+            }
+        }
         if has_press && inside && !selected && !pressed_on_down {
             self.frame.queue.push(Action::Press(path.clone(), button, held.touch));
         }

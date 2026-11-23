@@ -537,7 +537,10 @@ impl RuntimeCore {
 
     /// The held press is selecting text by dragging, and has selected some.
     pub(in crate::runtime) fn selected_by_drag(&self) -> bool {
-        self.edit.selectable.phase.dragging() && self.pointer.press_held().is_some_and(|h| h.moved) && (!self.selection_ranges().is_empty() || self.has_nonempty_selection())
+        let Some(h) = self.pointer.press_held() else { return false };
+        let short_link_drag = h.link_focus.is_some() && self.pointer.pos != Some(h.at) && self.link_selection_focus(&h.path) != h.link_focus;
+        self.edit.selectable.phase.dragging() && (h.moved || short_link_drag)
+            && (!self.selection_ranges().is_empty() || self.has_nonempty_selection())
     }
 
     pub(in crate::runtime) fn clear_text_selection(&mut self) {
@@ -627,16 +630,15 @@ impl RuntimeCore {
     /// clears the selection.
     pub(in crate::runtime) fn selection_down(&mut self, target: Option<usize>, x: f32, y: f32) {
         use virtual_selection::EndRef;
-        let Some(i) = target.filter(|&i| self.is_selectable(i) && self.link_at(i, x, y).is_none()) else {
+        let Some(i) = target.filter(|&i| self.is_selectable(i)) else {
             self.clear_text_selection();
             self.edit.selectable.presses.clear();
             return;
         };
+        let Some(clicks) = self.selection_clicks(i, x, y) else { self.clear_text_selection(); return };
         let Some(at) = self.text_index_at(i, x, y) else { return };
         let path = self.tree.nodes[i].path.clone();
         let content = self.content_of(i).to_owned();
-        let now = self.now_clock();
-        let clicks = self.edit.selectable.presses.press(&path, now, (x, y), self.double_click_interval).min(3);
         let i_end = EndRef::Mounted(i);
         let holder = self.selection_holder_end().filter(|&h| h == i_end || self.end_same_group(h, i_end));
         match holder {
