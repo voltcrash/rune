@@ -165,8 +165,7 @@ impl RuntimeCore {
         let ((x, y), scroll) = (f.origin, f.mode.scroll());
         self.touch_scroll_end(scroll, 0.0);
         if !self.cancel_drag() { self.drop_press(); }
-        self.secondary_down(x, y);
-        self.secondary_up(app, x, y);
+        self.touch_context_menu(app, x, y);
         if let Some(f) = self.pointer.touch.finger.as_mut() { f.mode = Mode::Menu; }
     }
 
