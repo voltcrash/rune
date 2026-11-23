@@ -329,15 +329,23 @@ impl TextSpec {
         if !for_copy || self.redacted || !self.cold.links.iter().any(|l| l.copy_text.is_some()) {
             return self.copy_slice(start, end);
         }
+        let mut hidden = Vec::<(u32, u32)>::new();
+        for &(a, b) in &self.cold.uncopied {
+            if let Some(last) = hidden.last_mut() && a <= last.1 { last.1 = last.1.max(b); }
+            else { hidden.push((a, b)); }
+        }
         let mut edits: Vec<_> = self.cold.links.iter().filter_map(|link| {
             let replacement = link.copy_text.as_deref()?;
-            (start <= link.start && link.start < link.end && link.end <= end
-                && self.content.get(link.start as usize..link.end as usize).is_some())
-                .then_some((link.start, link.end, Some(replacement)))
+            let mut a = link.start;
+            let mut b = link.end;
+            if let Some(&(s, e)) = hidden.get(hidden.partition_point(|r| r.1 <= a)) && s <= a { a = e; }
+            if let Some(&(s, e)) = hidden[..hidden.partition_point(|r| r.0 < b)].last() && e >= b { b = s; }
+            (start <= a && a < b && b <= end && self.content.get(a as usize..b as usize).is_some())
+                .then_some((a, b, Some(replacement)))
         }).collect();
         if edits.is_empty() { return self.copy_slice(start, end); }
-        edits.extend(self.cold.uncopied.iter().filter(|r| r.1 > start && r.0 < end)
-            .map(|&(a, b)| (a.max(start), b.min(end), None)));
+        edits.extend(hidden.into_iter().filter(|r| r.1 > start && r.0 < end)
+            .map(|(a, b)| (a.max(start), b.min(end), None)));
         edits.sort_by_key(|&(a, b, _)| (a, std::cmp::Reverse(b)));
         let mut out = String::new();
         let mut at = start;

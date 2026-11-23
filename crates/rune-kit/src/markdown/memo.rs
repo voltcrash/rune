@@ -417,8 +417,8 @@ impl Renderer {
             }
         }
         if let Some(ring) = &self.link_ring { ring(url).map(|(c, w)| (c, w.to_bits())).hash(h); }
-        if let Some(help) = &self.link_help { help(url).hash(h); }
-        if let Some(copy) = &self.link_copy { copy(url).hash(h); }
+        self.link_help.as_ref().and_then(|help| help(url)).hash(h);
+        self.link_copy.as_ref().and_then(|copy| copy(url)).hash(h);
         if self.s.link_icon.is_some()
             && let Some(host) = super::link_icon::link_host(url)
             && host != "github.com"
