@@ -9,7 +9,7 @@ pub enum CopyDestination {
     PrimarySelection,
 }
 
-type InputCopyTextFn = Rc<dyn Fn(&TextEdit, CopyDestination) -> Option<String>>;
+type InputCopyTextFn = Rc<dyn Fn(&TextEdit, CopyDestination) -> Option<crate::ClipboardWrite>>;
 
 /// A text field bound to a [`TextEdit`] in app state.
 #[derive(Clone)]
@@ -233,7 +233,12 @@ impl El {
     }
     /// Like [`El::input_copy_text`], with the destination so resources copied to the primary
     /// selection and the clipboard can have independent lifetimes.
-    pub fn input_copy_text_for(mut self, f: impl Fn(&TextEdit, CopyDestination) -> Option<String> + 'static) -> Self {
+    pub fn input_copy_text_for(self, f: impl Fn(&TextEdit, CopyDestination) -> Option<String> + 'static) -> Self {
+        self.input_copy_write(move |edit, destination| f(edit, destination).map(crate::ClipboardWrite::text))
+    }
+    /// Format a selection for its destination, optionally keeping a resource alive with
+    /// [`ClipboardWrite::with_resource`](crate::ClipboardWrite::with_resource).
+    pub fn input_copy_write(mut self, f: impl Fn(&TextEdit, CopyDestination) -> Option<crate::ClipboardWrite> + 'static) -> Self {
         if let Some(input) = self.cold.get_mut_if_some().and_then(|c| c.input.as_deref_mut()) {
             input.copy_text = Some(Rc::new(f));
         }

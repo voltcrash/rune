@@ -18,7 +18,7 @@ pub(crate) struct PrimarySelection {
     /// writes nothing.
     written: Option<u64>,
     /// Text to put on it.
-    pub(crate) write: Option<String>,
+    pub(crate) write: Option<crate::ClipboardWrite>,
     /// The text field a middle click pastes it into.
     pub(crate) paste: Option<String>,
 }
@@ -50,22 +50,22 @@ impl RuntimeCore {
     }
 
     pub(in crate::runtime) fn note_primary_selection(&mut self, app: &dyn ViewDriver, source: PrimarySource) {
-        let text = match source {
+        let write = match source {
             PrimarySource::Field(path) => {
                 let Some(input) = self.input_at(&path) else { return };
                 let edit = &input.edit;
                 let (start, end) = edit.range();
                 if edit.is_secure() || start == end { return; }
                 input.copy_text.as_ref().and_then(|f| f(edit, crate::CopyDestination::PrimarySelection))
-                    .or_else(|| Some(edit.selected().to_owned())).filter(|t| !t.is_empty())
+                    .or_else(|| Some(crate::ClipboardWrite::text(edit.selected()))).filter(|w| !w.is_empty())
             }
-            PrimarySource::Text(text) => text.or_else(|| self.selected_text(app)),
+            PrimarySource::Text(text) => text.or_else(|| self.selected_text(app)).map(crate::ClipboardWrite::text),
         };
-        let Some(text) = text else { return };
-        let hash = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(&text);
-        if self.edit.primary.written == Some(hash) { return; }
+        let Some(write) = write else { return };
+        let hash = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(write.content().text());
+        if !write.has_resource() && self.edit.primary.written == Some(hash) { return; }
         self.edit.primary.written = Some(hash);
-        self.edit.primary.write = Some(text);
+        self.edit.primary.write = Some(write);
     }
 
     /// A middle press at (x, y): on a text field that takes text, it focuses the field with its

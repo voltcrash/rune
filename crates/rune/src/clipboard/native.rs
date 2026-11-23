@@ -74,6 +74,18 @@ pub(super) fn shutdown() {
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 impl Backend for arboard::Clipboard {
     fn write(&mut self, copy: &ClipboardWrite) -> Result<(), String> { write(self, copy) }
+    #[cfg(target_os = "linux")]
+    fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
+        linux_owner::write(self, copy.content.text(), false).map(|selection| Some(Owner::Linux(selection)))
+    }
+    #[cfg(target_os = "macos")]
+    fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
+        macos::write(&objc2_app_kit::NSPasteboard::generalPasteboard(), &copy.content).map(|n| Some(Owner::Revision(n)))
+    }
+    #[cfg(target_os = "windows")]
+    fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
+        windows_owner::write(copy.content.text()).map(|source| Some(Owner::Windows(source)))
+    }
     fn text(&mut self) -> Option<Zeroizing<String>> { self.get_text().ok().map(Zeroizing::new) }
     #[cfg(target_os = "macos")]
     fn content(&mut self, all: bool) -> Option<ClipboardContent> {
@@ -139,7 +151,7 @@ fn write(cb: &mut arboard::Clipboard, copy: &ClipboardWrite) -> Result<(), Strin
     let content = &copy.content;
     if copy.clear_after.is_none() && content.is_rich() {
         #[cfg(target_os = "macos")]
-        { return macos::write(&objc2_app_kit::NSPasteboard::generalPasteboard(), content); }
+        { return macos::write(&objc2_app_kit::NSPasteboard::generalPasteboard(), content).map(|_| ()); }
         #[cfg(not(target_os = "macos"))]
         return write_one_form(cb, content);
     }

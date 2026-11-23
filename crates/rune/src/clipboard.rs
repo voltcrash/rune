@@ -33,6 +33,10 @@ mod macos;
 mod native;
 #[cfg(target_os = "linux")]
 mod primary;
+#[cfg(target_os = "linux")]
+mod linux_owner;
+#[cfg(target_os = "windows")]
+mod windows_owner;
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_os = "macos")]
@@ -51,21 +55,33 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|e| e.in
 pub struct ClipboardWrite {
     content: ClipboardContent,
     clear_after: Option<Duration>,
+    resource: Option<Arc<dyn Send + Sync>>,
     secret: Option<Arc<Unwritten>>,
 }
 impl ClipboardWrite {
     pub(crate) fn new(content: ClipboardContent) -> Self {
-        Self { content, clear_after: None, secret: None }
+        Self { content, clear_after: None, resource: None, secret: None }
+    }
+    /// A plain text write for a formatted field selection.
+    pub fn text(text: impl Into<String>) -> Self { Self::new(ClipboardContent::new(text)) }
+    /// Keep a resource such as a temporary file alive while this text remains on a native
+    /// desktop clipboard. The worker drops it after replacement, a failed write, or shutdown.
+    /// Browser clipboard writes do not track ownership.
+    pub fn with_resource(mut self, resource: impl Send + Sync + 'static) -> Self {
+        self.resource = Some(Arc::new(resource));
+        self
     }
     /// Secrets are plain text only: no HTML or RTF copy of a password lingers.
     pub(crate) fn secret(text: String, clear_after: Duration) -> (Self, SecretCopy) {
         let slot = Arc::new(Slot::default());
-        let write = Self { content: ClipboardContent::new(text), clear_after: Some(clear_after), secret: Some(Arc::new(Unwritten(slot.clone()))) };
+        let write = Self { content: ClipboardContent::new(text), clear_after: Some(clear_after), resource: None, secret: Some(Arc::new(Unwritten(slot.clone()))) };
         (write, SecretCopy(slot))
     }
     /// Everything this write puts on the clipboard.
     pub fn content(&self) -> &ClipboardContent { &self.content }
     pub(crate) fn is_secret(&self) -> bool { self.clear_after.is_some() }
+    #[cfg(target_os = "linux")]
+    pub(crate) fn has_resource(&self) -> bool { self.resource.is_some() }
     fn slot(&self) -> Option<&Arc<Slot>> { self.secret.as_ref().map(|u| &u.0) }
     fn bind(&self, route: Route) {
         if let Some(slot) = self.slot() { slot.route.set(route).ok(); }
@@ -299,10 +315,16 @@ pub(crate) fn clear_secret_now() {
 pub(crate) fn shutdown() {
     #[cfg(not(target_arch = "wasm32"))]
     native::shutdown();
+    #[cfg(target_os = "linux")]
+    primary::shutdown();
 }
 
 trait Backend {
     fn write(&mut self, copy: &ClipboardWrite) -> Result<(), String>;
+    fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
+        self.write(copy)?;
+        Ok(self.revision().map(Owner::Revision))
+    }
     fn text(&mut self) -> Option<Zeroizing<String>>;
     /// Every form a paste can use, unsanitised, and the image and files only when asked (`all`):
     /// decoding an image can take a while.
@@ -336,12 +358,38 @@ impl WriteSteps for RealTime {
     fn now(&self) -> Instant { crate::time::now() }
 }
 
+enum Owner {
+    Revision(u64),
+    #[cfg(target_os = "linux")]
+    Linux(linux_owner::Selection),
+    #[cfg(target_os = "windows")]
+    Windows(windows_owner::Source),
+}
+
+impl Owner {
+    fn lost(&self, board: &impl Backend) -> bool {
+        match self {
+            Self::Revision(revision) => board.revision().is_some_and(|now| now != *revision),
+            #[cfg(target_os = "linux")]
+            Self::Linux(selection) => selection.lost(),
+            #[cfg(target_os = "windows")]
+            Self::Windows(source) => source.lost(),
+        }
+    }
+}
+
+struct Retained {
+    _resource: Arc<dyn Send + Sync>,
+    owner: Owner,
+    next: Instant,
+}
+
 /// The clipboard owner's bookkeeping, shared by the OS worker and the memory clipboard.
 #[derive(Default)]
-struct Core { keys: RandomState, seq: Seq, hold: Hold, alarm: Option<Alarm>, own_pills: Option<OwnPills> }
+struct Core { keys: RandomState, seq: Seq, hold: Hold, alarm: Option<Alarm>, retained: Option<Retained>, own_pills: Option<OwnPills> }
 impl Core {
     fn next_check(&self) -> Option<Instant> {
-        self.hold.next_check(crate::time::now() + WATCH)
+        self.hold.next_check(crate::time::now() + WATCH).into_iter().chain(self.retained.as_ref().map(|r| r.next)).min()
     }
 
     fn handle<B: Backend>(&mut self, cb: &mut B, request: Request) {
@@ -379,13 +427,20 @@ impl Core {
         let slot = copy.slot().cloned();
         let notify = notify.filter(|_| slot.is_some());
         if slot.as_ref().is_some_and(|s| s.cancelled()) { return; } // `Unwritten` settles it as cleared.
-        if let Err(error) = cb.write(&copy) {
-            if let Some(s) = &slot { s.set(SecretState::Failed(error)); }
-            if let Some(n) = &notify { n.send(); }
-            return;
-        }
+        let result = if copy.resource.is_some() { cb.write_owned(&copy) } else { cb.write(&copy).map(|()| None) };
+        let owner = match result {
+            Ok(owner) => owner,
+            Err(error) => {
+                if let Some(s) = &slot { s.set(SecretState::Failed(error)); }
+                if let Some(n) = &notify { n.send(); }
+                return;
+            }
+        };
         self.apply(cb, HoldEvent::Lost);
         let rev = cb.revision();
+        self.retained = owner.zip(copy.resource.clone()).map(|(owner, resource)| Retained {
+            owner, _resource: resource, next: crate::time::now() + WATCH,
+        });
         self.own_pills = copy
             .clear_after
             .is_none()
@@ -453,6 +508,12 @@ impl Core {
     fn tick<B: Backend>(&mut self, cb: &mut B) { self.tick_at(cb, crate::time::now()); }
 
     fn tick_at<B: Backend>(&mut self, cb: &mut B, now: Instant) {
+        if let Some(held) = &mut self.retained
+            && (now >= held.next || matches!(held.owner, Owner::Revision(_)))
+        {
+            if held.owner.lost(cb) { self.retained = None; }
+            else if now >= held.next { held.next = now + WATCH; }
+        }
         if let Some(own) = &self.own_pills
             && let Some(rev) = own.revision
             && cb.revision() != Some(rev)

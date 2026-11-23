@@ -261,3 +261,47 @@ fn a_staged_pending_copy_stays_pending_and_clear_now_is_a_no_op() {
     assert_eq!(clone.state(), SecretState::Pending);
     assert!(!clone.holds());
 }
+
+#[test]
+fn formatted_copies_retain_their_resource_until_the_clipboard_is_replaced() {
+    let m = memory();
+    let copy = || {
+        let file = Arc::new(());
+        let weak = Arc::downgrade(&file);
+        m.handle(Request::Write(ClipboardWrite::text("file reference").with_resource(file), None));
+        weak
+    };
+    let first = copy();
+    assert!(first.upgrade().is_some());
+    let second = copy();
+    assert!(first.upgrade().is_none());
+    m.set_text("file reference");
+    assert!(second.upgrade().is_none());
+    let third = copy();
+    m.handle(Request::Write(ClipboardWrite::text("message"), None));
+    assert!(third.upgrade().is_none());
+    assert_eq!(text(&m).as_deref(), Some("message"));
+}
+
+
+#[test]
+fn an_unknown_clipboard_revision_does_not_drop_a_resource_or_read_text() {
+    struct Board(Option<u64>);
+    impl Backend for Board {
+        fn write(&mut self, _: &ClipboardWrite) -> Result<(), String> { Ok(()) }
+        fn text(&mut self) -> Option<Zeroizing<String>> { panic!("ownership must not read clipboard text") }
+        fn revision(&self) -> Option<u64> { self.0 }
+        fn clear(&mut self) -> Result<(), String> { Ok(()) }
+    }
+    let (mut core, mut board) = (Core::default(), Board(Some(1)));
+    let file = Arc::new(());
+    let weak = Arc::downgrade(&file);
+    core.handle(&mut board, Request::Write(ClipboardWrite::text("reference").with_resource(file), None));
+    board.0 = None;
+    core.tick_at(&mut board, core.next_check().unwrap());
+    assert!(weak.upgrade().is_some());
+    board.0 = Some(2);
+    core.tick_at(&mut board, core.next_check().unwrap());
+    assert!(weak.upgrade().is_none());
+    assert!(core.next_check().is_none());
+}

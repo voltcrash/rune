@@ -2,51 +2,48 @@
 //! data control): its own worker over arboard, beside the clipboard's, so a primary read never
 //! waits behind a clipboard read and a secret's hold never sees it. What goes on it and where a
 //! middle click pastes it is the runtime's (`runtime/input/primary_selection.rs`).
-use arboard::{GetExtLinux, LinuxClipboardKind, SetExtLinux};
+use arboard::{ClearExtLinux, GetExtLinux, LinuxClipboardKind::Primary, SetExtLinux};
 
 use super::*;
 
-enum Request {
-    Write(String),
-    /// Paste it into field `target`: the answer comes back as that field's paste.
-    Read { target: String, reply: mpsc::Sender<Reply>, wake: Waker },
+struct PrimaryBoard(arboard::Clipboard);
+
+impl Backend for PrimaryBoard {
+    fn write(&mut self, copy: &ClipboardWrite) -> Result<(), String> {
+        self.0.set().clipboard(Primary).text(copy.content().text()).map_err(|e| e.to_string())
+    }
+    fn write_owned(&mut self, copy: &ClipboardWrite) -> Result<Option<Owner>, String> {
+        linux_owner::write(&mut self.0, copy.content.text(), true).map(|selection| Some(Owner::Linux(selection)))
+    }
+    fn text(&mut self) -> Option<Zeroizing<String>> {
+        self.0.get().clipboard(Primary).text().ok().filter(|s| !s.is_empty()).map(Zeroizing::new)
+    }
+    fn revision(&self) -> Option<u64> { None }
+    fn clear(&mut self) -> Result<(), String> {
+        self.0.clear_with().clipboard(Primary).map_err(|e| e.to_string())
+    }
 }
 
-static WORKER: OnceLock<mpsc::Sender<Request>> = OnceLock::new();
+static WORKER: OnceLock<native::Worker> = OnceLock::new();
 
 fn worker() -> &'static mpsc::Sender<Request> {
     if cfg!(test) {
         panic!("unit test reached the OS primary selection; install a test clipboard (`rt.use_clipboard` or `Client::use_memory`)");
     }
-    WORKER.get_or_init(|| {
-        let (sender, requests) = mpsc::channel();
-        std::thread::Builder::new().name("rune-primary".into()).spawn(move || run(requests)).ok();
-        sender
-    })
+    &WORKER.get_or_init(|| native::Worker::spawn(|| arboard::Clipboard::new().ok().map(PrimaryBoard))).sender
 }
 
-fn run(requests: mpsc::Receiver<Request>) {
-    let mut board: Option<arboard::Clipboard> = None;
-    for request in requests {
-        if board.is_none() { board = arboard::Clipboard::new().ok(); }
-        let Some(cb) = board.as_mut() else { continue };
-        match request {
-            Request::Write(text) => { cb.set().clipboard(LinuxClipboardKind::Primary).text(text).ok(); }
-            Request::Read { target, reply, wake } => {
-                let text = cb.get().clipboard(LinuxClipboardKind::Primary).text().ok().filter(|t| !t.is_empty());
-                let answer = Purpose::Paste(Some(target), Forms::Text).reply(text.map(|t| ClipboardContent::from(Zeroizing::new(t))));
-                if let Some(answer) = answer && reply.send(answer).is_ok() { wake(); }
-            }
-        }
-    }
+pub(super) fn shutdown() {
+    if let Some(worker) = WORKER.get() { worker.stop(); }
 }
 
 impl Client {
     /// Hands the worker what the runtime asked of the primary selection.
     pub(super) fn flush_primary(&self, rt: &mut crate::runtime::RuntimeCore) {
-        if let Some(text) = rt.edit.primary.write.take() { worker().send(Request::Write(text)).ok(); }
+        if let Some(write) = rt.edit.primary.write.take() { worker().send(Request::Write(write, None)).ok(); }
         if let Some(target) = rt.edit.primary.paste.take() {
-            worker().send(Request::Read { target, reply: self.sender.clone(), wake: self.wake.clone() }).ok();
+            let purpose = Purpose::Paste(Some(target), Forms::Text);
+            worker().send(Request::Read { purpose, reply: self.sender.clone(), wake: self.wake.clone() }).ok();
         }
     }
 }

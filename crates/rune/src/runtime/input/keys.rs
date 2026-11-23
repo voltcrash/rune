@@ -164,6 +164,7 @@ impl RuntimeCore {
         let copies = matches!(ev.edit_command(), Some('c' | 'x'));
         let format = if copies { self.focused_input().and_then(|i| i.copy_text.clone()) } else { None };
         let mut html = None;
+        let mut formatted = None;
         let handled = self.with_focused(app, |e| {
             let text = format.as_ref().and_then(|f| {
                 if e.is_secure() { return None; }
@@ -174,9 +175,10 @@ impl RuntimeCore {
                 html = Some(e.selected_html()).filter(|h| !h.is_empty());
             }
             let mut out = e.key_in(ev, layout.as_ref().map(TextLayout::view));
-            if out.copy.is_some() && let Some(text) = text { out.copy = Some(text); }
+            if out.copy.is_some() && let Some(write) = text { out.copy = None; formatted = Some(write); }
             out
         }, tx);
+        if let Some(write) = formatted { tx.copy = Some(write); }
         if let Some(html) = html
             && let Some(text) = tx.copy.as_ref().filter(|w| !w.is_secret()).map(|w| w.content().text().to_owned())
         {
