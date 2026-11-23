@@ -231,7 +231,8 @@ impl Rendered {
         if range.start >= range.end || range.end > text.len() {
             return Vec::new();
         }
-        map_vis_range(src, segments, &mut 0, range)
+        let mut first = segments.partition_point(|seg| seg.out.end <= range.start);
+        map_vis_range(src, segments, &mut first, range)
     }
 
     /// [`find`] over these blocks: `src` is the source this was made from.

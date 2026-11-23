@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use rune::{Cx, El, Env, Runtime, ScrollSpec, col};
-use rune_kit::markdown::{Case, Highlight, find};
+use rune_kit::markdown::{Case, Highlight, Rendered, find};
 use rune_kit::{Kit, Markdown, MarkdownStyle};
 
 fn slice_all<'a>(src: &'a str, matches: &[Vec<Range<usize>>]) -> Vec<Vec<&'a str>> {
@@ -377,6 +377,19 @@ fn one_megabyte_document_searches_linearly() {
 
     let sensitive = find(&doc, "Continuation line", Case::Sensitive);
     assert_eq!(sensitive.len(), repeats);
+}
+
+#[test]
+fn source_ranges_can_seek_to_each_formatted_span_in_reverse() {
+    let line = "**needle**\n";
+    let lines = 20_000;
+    let src = line.repeat(lines);
+    let rendered = Rendered::new(&src);
+    for i in (0..lines).rev() {
+        let start = i * "needle ".len();
+        let source = i * line.len() + 2;
+        assert_eq!(rendered.source_ranges(&src, 0, start..start + 6), vec![source..source + 6]);
+    }
 }
 
 #[test]
