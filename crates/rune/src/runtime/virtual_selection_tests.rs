@@ -483,15 +483,26 @@ fn primary_release_keeps_virtual_text_when_its_selection_handler_removes_the_row
                 })
         )
     };
-    let rows: Rows = (0..ROWS).map(|i| format!("row {i}")).collect();
-    let expected = rows.join("\n");
-    let mut rt = Runtime::new(rows, view, (320.0, 180.0), Env::new(true, 1.0));
-    tick(&mut rt);
-    rt.update(|_, tx| tx.select_all_text("rows"));
-    tick(&mut rt);
-    { let (core, app) = rt.split_mut(); core.primary_released(&app); }
-    rt.invalidate();
-    tick(&mut rt);
-    assert!(rt.state.is_empty());
-    assert_eq!(rt.edit.primary.write.as_deref(), Some(expected.as_str()));
+    for dirty_during_drag in [false, true] {
+        let rows: Rows = (0..ROWS).map(|i| format!("row {i}")).collect();
+        let expected = rows.join("\n");
+        let mut rt = Runtime::new(rows, view, (320.0, 180.0), Env::new(true, 1.0));
+        tick(&mut rt);
+        rt.update(|_, tx| tx.select_all_text("rows"));
+        tick(&mut rt);
+        if dirty_during_drag {
+            let selected = rt.edit.selectable.phase.selection_mut().unwrap();
+            let (focus, far) = (selected.focus, selected.far.take());
+            rt.split_mut().0.select_step(super::phase::Event::Extend { focus, far });
+            rt.update(|_, tx| assert_eq!(tx.text_selection().unwrap().text(), expected));
+            rt.pointer_up(0., 0.);
+        } else {
+            let (core, app) = rt.split_mut();
+            core.primary_released(&app);
+        }
+        rt.invalidate();
+        tick(&mut rt);
+        assert!(rt.state.is_empty());
+        assert_eq!(rt.edit.primary.write.as_deref(), Some(expected.as_str()));
+    }
 }
