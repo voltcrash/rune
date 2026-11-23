@@ -51,21 +51,33 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|e| e.in
 pub struct ClipboardWrite {
     content: ClipboardContent,
     clear_after: Option<Duration>,
+    resource: Option<Arc<dyn Send + Sync>>,
     secret: Option<Arc<Unwritten>>,
 }
 impl ClipboardWrite {
     pub(crate) fn new(content: ClipboardContent) -> Self {
-        Self { content, clear_after: None, secret: None }
+        Self { content, clear_after: None, resource: None, secret: None }
+    }
+    /// A plain text write for a formatted field selection.
+    pub fn text(text: impl Into<String>) -> Self { Self::new(ClipboardContent::new(text)) }
+    /// Keep a resource such as a temporary file alive while this text remains on a native
+    /// desktop clipboard. The worker drops it after replacement, a failed write, or shutdown.
+    /// Browser clipboard writes do not track ownership.
+    pub fn with_resource(mut self, resource: impl Send + Sync + 'static) -> Self {
+        self.resource = Some(Arc::new(resource));
+        self
     }
     /// Secrets are plain text only: no HTML or RTF copy of a password lingers.
     pub(crate) fn secret(text: String, clear_after: Duration) -> (Self, SecretCopy) {
         let slot = Arc::new(Slot::default());
-        let write = Self { content: ClipboardContent::new(text), clear_after: Some(clear_after), secret: Some(Arc::new(Unwritten(slot.clone()))) };
+        let write = Self { content: ClipboardContent::new(text), clear_after: Some(clear_after), resource: None, secret: Some(Arc::new(Unwritten(slot.clone()))) };
         (write, SecretCopy(slot))
     }
     /// Everything this write puts on the clipboard.
     pub fn content(&self) -> &ClipboardContent { &self.content }
     pub(crate) fn is_secret(&self) -> bool { self.clear_after.is_some() }
+    #[cfg(target_os = "linux")]
+    pub(crate) fn has_resource(&self) -> bool { self.resource.is_some() }
     fn slot(&self) -> Option<&Arc<Slot>> { self.secret.as_ref().map(|u| &u.0) }
     fn bind(&self, route: Route) {
         if let Some(slot) = self.slot() { slot.route.set(route).ok(); }
@@ -299,6 +311,8 @@ pub(crate) fn clear_secret_now() {
 pub(crate) fn shutdown() {
     #[cfg(not(target_arch = "wasm32"))]
     native::shutdown();
+    #[cfg(target_os = "linux")]
+    primary::shutdown();
 }
 
 trait Backend {
@@ -336,12 +350,30 @@ impl WriteSteps for RealTime {
     fn now(&self) -> Instant { crate::time::now() }
 }
 
+struct Retained {
+    _resource: Arc<dyn Send + Sync>,
+    print: u64,
+    revision: Option<u64>,
+    next: Instant,
+}
+
+impl Retained {
+    fn for_write(copy: &ClipboardWrite, revision: Option<u64>, keys: &RandomState) -> Option<Self> {
+        let resource = copy.resource.clone()?;
+        Some(Self { _resource: resource, print: keys.hash_one(copy.content.text()), revision, next: crate::time::now() + WATCH })
+    }
+
+    fn matches(&self, text: Option<&str>, keys: &RandomState) -> bool {
+        text.is_some_and(|s| keys.hash_one(s) == self.print)
+    }
+}
+
 /// The clipboard owner's bookkeeping, shared by the OS worker and the memory clipboard.
 #[derive(Default)]
-struct Core { keys: RandomState, seq: Seq, hold: Hold, alarm: Option<Alarm>, own_pills: Option<OwnPills> }
+struct Core { keys: RandomState, seq: Seq, hold: Hold, alarm: Option<Alarm>, retained: Option<Retained>, own_pills: Option<OwnPills> }
 impl Core {
     fn next_check(&self) -> Option<Instant> {
-        self.hold.next_check(crate::time::now() + WATCH)
+        self.hold.next_check(crate::time::now() + WATCH).into_iter().chain(self.retained.as_ref().map(|r| r.next)).min()
     }
 
     fn handle<B: Backend>(&mut self, cb: &mut B, request: Request) {
@@ -386,6 +418,7 @@ impl Core {
         }
         self.apply(cb, HoldEvent::Lost);
         let rev = cb.revision();
+        self.retained = Retained::for_write(&copy, rev, &self.keys);
         self.own_pills = copy
             .clear_after
             .is_none()
@@ -453,6 +486,17 @@ impl Core {
     fn tick<B: Backend>(&mut self, cb: &mut B) { self.tick_at(cb, crate::time::now()); }
 
     fn tick_at<B: Backend>(&mut self, cb: &mut B, now: Instant) {
+        if let Some(held) = &mut self.retained {
+            let current = if let Some(rev) = held.revision {
+                cb.revision() == Some(rev)
+            } else if now >= held.next {
+                held.matches(cb.text().as_ref().map(|s| s.as_str()), &self.keys)
+            } else {
+                true
+            };
+            if !current { self.retained = None; }
+            else if now >= held.next { held.next = now + WATCH; }
+        }
         if let Some(own) = &self.own_pills
             && let Some(rev) = own.revision
             && cb.revision() != Some(rev)
