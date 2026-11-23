@@ -59,7 +59,7 @@ impl RuntimeCore {
         if has_drag && drag_move {
             let (dx, dy) = (x - at.0, y - at.1);
             let [lx, ly] = self.to_local(i, x, y);
-            let d = Drag { phase: Phase::Move, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d };
+            let d = Drag { phase: Phase::Move, mods: self.kbd.held_mods, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d };
             self.frame.queue.push(Action::Drag(path, d, button));
         }
     }
@@ -147,7 +147,7 @@ impl RuntimeCore {
         let (dx, dy) = (x - at.0, y - at.1);
         let screen = self.screen_at(x, y);
         let Some(held) = self.drop_press() else { return false };
-        let d = Drag { phase: Phase::Up, x: lx, y: ly, dx, dy, cancelled: true, window: [x, y], screen, ..held.drag };
+        let d = Drag { phase: Phase::Up, mods: self.kbd.held_mods, x: lx, y: ly, dx, dy, cancelled: true, window: [x, y], screen, ..held.drag };
         self.frame.queue.push(Action::Drag(held.path, d, held.button));
         self.pointer.end_press_repeat();
         true
@@ -308,6 +308,7 @@ impl RuntimeCore {
         let [lx, ly] = self.to_local(ti, x, y);
         let d = Drag {
             phase: Phase::Down,
+            mods: self.kbd.held_mods,
             x: lx,
             y: ly,
             w: r[2] - r[0],
@@ -422,7 +423,7 @@ impl RuntimeCore {
         if has_drag {
             let (dx, dy) = (x - at.0, y - at.1);
             let [lx, ly] = self.to_local(i, x, y);
-            self.frame.queue.push(Action::Drag(path.clone(), Drag { phase: Phase::Up, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d }, button));
+            self.frame.queue.push(Action::Drag(path.clone(), Drag { phase: Phase::Up, mods: self.kbd.held_mods, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d }, button));
         }
         if let Some(k) = link.filter(|_| inside) { self.link_up(&path, k, x, y, button); }
         if has_press && inside && !selected && !pressed_on_down {

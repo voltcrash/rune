@@ -178,6 +178,7 @@ impl RuntimeCore {
         self.frame.queue.push(Action::Focus(path.clone(), x, y));
         let d = Drag {
             phase: Phase::Down,
+            mods: self.kbd.held_mods,
             x: lx,
             y: ly,
             w: r[2] - r[0],

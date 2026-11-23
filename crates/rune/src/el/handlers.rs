@@ -154,6 +154,8 @@ pub enum Phase {
 #[derive(Clone, Copy, Debug)]
 pub struct Drag {
     pub phase: Phase,
+    /// Modifiers held when the host delivered this phase.
+    pub mods: crate::Mods,
     pub x: f32,
     pub y: f32,
     pub w: f32,

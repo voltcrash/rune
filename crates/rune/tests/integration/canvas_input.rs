@@ -136,6 +136,25 @@ fn pinch_rotation_and_smart_magnify_arrive_in_the_handlers_points() {
 }
 
 #[test]
+fn secondary_capture_keeps_each_events_position_and_modifiers() {
+    let mut rt = Runtime::new(Vec::new(), |_, _: &mut Cx<Vec<(Phase, PointerButton, f32, bool)>>| {
+        el().w(100.).h(80.).pointer_buttons([PointerButton::Secondary])
+            .on_drag(|events: &mut Vec<_>, d, tx| events.push((d.phase, tx.button(), d.x, d.mods.shift)))
+    }, (200., 120.), Env::new(true, 1.));
+    rt.frame(0.);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods { shift: true, ..Mods::default() }));
+    rt.secondary_down(15., 25.);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.pointer_move(125., 25.);
+    rt.secondary_up(125., 25.);
+    rt.frame(0.);
+    let button = PointerButton::Secondary;
+    assert_eq!(rt.state.first(), Some(&(Phase::Down, button, 15., true)));
+    assert!(rt.state.contains(&(Phase::Move, button, 125., false)));
+    assert_eq!(rt.state.last(), Some(&(Phase::Up, button, 125., false)));
+}
+
+#[test]
 fn the_middle_button_drags_only_elements_that_take_it() {
     let mut rt = app(S::default());
     // Over the canvas's child, the canvas takes the middle button.

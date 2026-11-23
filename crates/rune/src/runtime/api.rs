@@ -635,7 +635,7 @@ impl<S: 'static> Runtime<S> {
 
     #[cfg(test)]
     #[inline(always)]
-    pub(super) fn secondary_target(&self, x: f32, y: f32) -> Option<&str> { self.core().secondary_target(x, y) }
+    pub(super) fn secondary_target(&self, x: f32, y: f32) -> Option<&str> { self.core().secondary_target(x, y, true) }
 
     #[cfg(test)]
     #[inline(always)]

@@ -146,7 +146,7 @@ impl RuntimeCore {
         let (x, y) = self.pointer.pos.unwrap_or(at);
         let [lx, ly] = self.to_local(i, x, y);
         let (dx, dy) = (x - at.0, y - at.1);
-        self.frame.queue.push(Action::DragRepeat(path.to_owned(), Drag { phase: Phase::Move, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d }, button));
+        self.frame.queue.push(Action::DragRepeat(path.to_owned(), Drag { phase: Phase::Move, mods: self.kbd.held_mods, x: lx, y: ly, dx, dy, window: [x, y], screen: self.screen_at(x, y), ..d }, button));
     }
 }
 

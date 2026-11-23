@@ -1,6 +1,52 @@
 use super::*;
 
 
+fn secondary_canvas() -> Runtime<Vec<&'static str>> {
+    let mut rt = Runtime::new(Vec::new(), |_, _: &mut Cx<Vec<&'static str>>| {
+        el().size(100., 100.).child(el().size(50., 50.)
+            .pointer_buttons([crate::PointerButton::Secondary])
+            .on_press(|s: &mut Vec<_>| s.push("click"))
+            .on_drag(|s: &mut Vec<_>, d, tx| {
+                if tx.button() == crate::PointerButton::Secondary {
+                    s.push(match d.phase { Phase::Down => "down", Phase::Move => "move", Phase::Up if d.cancelled() => "cancel", Phase::Up => "up" });
+                }
+            })
+            .on_secondary_press(|s: &mut Vec<_>, _, _| s.push("menu")))
+    }, (100., 100.), Env::default());
+    rt.frame(0.);
+    rt
+}
+
+#[test]
+fn secondary_canvas_release_outside_without_motion_does_not_click() {
+    let mut rt = secondary_canvas();
+    rt.secondary_down(10., 10.);
+    rt.secondary_up(85., 85.);
+    rt.frame(0.);
+    assert_eq!(rt.state.last(), Some(&"up"));
+    assert!(!rt.state.contains(&"click"));
+}
+
+#[test]
+fn secondary_canvas_relinquishes_a_gesture_to_the_host_menu() {
+    let mut rt = secondary_canvas();
+    rt.secondary_down(10., 10.);
+    rt.secondary_abandon();
+    rt.secondary_up(10., 10.);
+    rt.frame(0.);
+    assert_eq!(rt.state, ["down", "cancel"]);
+}
+
+#[test]
+fn secondary_canvas_long_touch_still_opens_its_context_menu() {
+    let mut rt = secondary_canvas();
+    rt.touch(1, crate::TouchPhase::Started, 10., 10., 0.);
+    rt.frame(0.6);
+    rt.touch(1, crate::TouchPhase::Ended, 10., 10., 0.6);
+    rt.frame(0.);
+    assert_eq!(rt.state, ["menu"]);
+}
+
 #[test]
 fn overlay_hit_regions_follow_live_geometry_and_ancestor_clips_in_the_same_frame() {
     struct State { offset: crate::Live<[f32; 2]>, opacity: crate::Live<f32>, pressed: u32, hovered: u32, visible: bool }
