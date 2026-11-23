@@ -508,6 +508,20 @@ impl TextEdit {
 const HISTORY_FORMAT: u64 = 2;
 
 impl TextEdit {
+    /// Pill IDs held by the editor, including those a pending undo group, undo or redo can restore.
+    /// An ID can occur more than once. A consumer can release resources after their IDs disappear.
+    pub fn retained_pill_ids(&self) -> impl Iterator<Item = &str> + '_ {
+        let group_marks = match &self.group {
+            Group::Open(snapshot) => snapshot.marks.as_slice(),
+            Group::Closed | Group::Unrecorded => &[],
+        };
+        let history_marks = self.history.undo.iter().chain(&self.history.redo)
+            .flat_map(|change| change.before.marks.iter().chain(&change.after.marks));
+        self.pills().map(|(_, id)| id).chain(
+            group_marks.iter().chain(history_marks).filter_map(|range| range.mark.pill_id())
+        )
+    }
+
     /// How many steps undo and redo hold. A change says the history moved, for an app that
     /// stores it ([`TextEdit::history_json`]) only when it has.
     pub fn history_len(&self) -> (usize, usize) {

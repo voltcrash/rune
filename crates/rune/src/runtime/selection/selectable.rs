@@ -37,8 +37,7 @@ pub(crate) use copy_join::CopyJoin;
 pub(crate) use selection_toolbar::OnPress;
 pub use text_selection::{SelectedText, SelectionChange, TextSelection};
 
-/// The commit, the selection's ends and whether a press is making it: what a selection read
-/// from them depends on.
+/// The commit and endpoints identify the selected text. Change listeners also track the drag phase.
 type Basis = (u64, Option<String>, usize, usize, Option<String>, bool);
 
 /// `Tx::text_selection`'s snapshot and what it was taken from.
@@ -216,7 +215,7 @@ pub(in crate::runtime) fn same_keyed_path(a: &str, b: &str) -> bool {
 impl caret::TextInputState {
     /// With nothing selected the basis reads ends of 0: nothing that compares it can change its
     /// answer, since any selection made since differs in its path.
-    pub(super) fn same_selection_basis(&self, commits: u64, from: &Basis) -> bool {
+    pub(super) fn same_selection_range(&self, commits: u64, from: &Basis) -> bool {
         let phase = &self.selectable.phase;
         let sel = phase.selection();
         from.0 == commits
@@ -224,7 +223,6 @@ impl caret::TextInputState {
             && from.2 == sel.map_or(0, |s| s.anchor)
             && from.3 == sel.map_or(0, |s| s.focus)
             && from.4.as_deref() == sel.and_then(|s| s.far.as_ref()).map(|f| f.path.as_str())
-            && from.5 == phase.dragging()
     }
 
     pub(super) fn selection_basis(&self, commits: u64) -> Basis {
@@ -234,9 +232,9 @@ impl caret::TextInputState {
             sel.and_then(|s| s.far.as_ref()).map(|f| f.path.clone()), phase.dragging())
     }
 
-    pub(super) fn cached_selection_snapshot(&self, commits: u64) -> Option<Option<Rc<TextSelection>>> {
+    pub(in crate::runtime) fn cached_selection_snapshot(&self, commits: u64) -> Option<Option<Rc<TextSelection>>> {
         let cache = self.sel_snapshot.borrow();
-        cache.as_ref().filter(|s| self.same_selection_basis(commits, &s.from)).map(|s| s.selection.clone())
+        cache.as_ref().filter(|s| self.same_selection_range(commits, &s.from)).map(|s| s.selection.clone())
     }
 
     pub(super) fn cache_selection_snapshot(&self, commits: u64, selection: Option<Rc<TextSelection>>) {
@@ -402,7 +400,9 @@ impl RuntimeCore {
     /// The `El::on_selection_change` calls owed since the last check: each element whose part
     /// of the selection changed, started or cleared.
     pub(in crate::runtime) fn selection_changes(&mut self, app: &dyn ViewDriver) -> Vec<Action> {
-        if self.edit.sel_heard.from.as_ref().is_some_and(|f| self.edit.same_selection_basis(self.commit.commits, f)) { return Vec::new(); }
+        if self.edit.sel_heard.from.as_ref().is_some_and(|f| {
+            f.5 == self.edit.selectable.phase.dragging() && self.edit.same_selection_range(self.commit.commits, f)
+        }) { return Vec::new(); }
         // A release is heard by whoever holds the selection, though it didn't change.
         let released = self.edit.sel_heard.from.as_ref().is_some_and(|f| f.5 && !self.edit.selectable.phase.dragging());
         self.edit.sel_heard.from = Some(self.edit.selection_basis(self.commit.commits));

@@ -13,6 +13,7 @@ use super::*;
 pub(crate) struct PrimarySelection {
     /// A primary button came up: after this frame's handlers, what's selected goes on it.
     pending: bool,
+    text: Option<String>,
     /// A hash of the text last put on it, so a click that leaves the selection as it was
     /// writes nothing.
     written: Option<u64>,
@@ -22,21 +23,43 @@ pub(crate) struct PrimarySelection {
     pub(crate) paste: Option<String>,
 }
 
+pub(in crate::runtime) enum PrimarySource {
+    Field(String),
+    Text(Option<String>),
+}
+
 impl RuntimeCore {
-    /// The primary button came up.
-    pub(in crate::runtime) fn primary_released(&mut self) {
+    /// Text selected by a pointer is final on release, before callbacks can change virtual rows.
+    pub(in crate::runtime) fn primary_released(&mut self, app: &dyn ViewDriver) {
         self.edit.primary.pending = true;
+        self.edit.primary.text = if self.commit.dirty && self.selection_spans_unmounted() {
+            self.edit.cached_selection_snapshot(self.commit.commits).flatten().map(|s| s.text().to_owned())
+        } else {
+            self.selected_text(app)
+        };
     }
 
-    /// After a frame's handlers, once the release's caret and selection landed: puts what's
-    /// selected on the primary selection, if it changed.
-    pub(in crate::runtime) fn note_primary_selection(&mut self, app: &dyn ViewDriver) {
-        if !std::mem::take(&mut self.edit.primary.pending) { return; }
-        let text = match self.focused_input() {
-            Some(input) if input.edit.is_secure() || input.edit.anchor == input.edit.focus => None,
-            Some(input) => input.copy_text.as_ref().and_then(|f| f(&input.edit))
-                .or_else(|| Some(input.edit.selected().to_owned())).filter(|t| !t.is_empty()),
-            None => self.selected_text(app),
+    /// Holds the selection's source before a release handler's requested focus takes effect.
+    pub(in crate::runtime) fn take_primary_source(&mut self) -> Option<PrimarySource> {
+        if !std::mem::take(&mut self.edit.primary.pending) { return None; }
+        let text = self.edit.primary.text.take();
+        if let Some(path) = self.kbd.focus.path() && self.input_at(path).is_some() {
+            return Some(PrimarySource::Field(path.to_owned()));
+        }
+        Some(PrimarySource::Text(text))
+    }
+
+    pub(in crate::runtime) fn note_primary_selection(&mut self, app: &dyn ViewDriver, source: PrimarySource) {
+        let text = match source {
+            PrimarySource::Field(path) => {
+                let Some(input) = self.input_at(&path) else { return };
+                let edit = &input.edit;
+                let (start, end) = edit.range();
+                if edit.is_secure() || start == end { return; }
+                input.copy_text.as_ref().and_then(|f| f(edit, crate::CopyDestination::PrimarySelection))
+                    .or_else(|| Some(edit.selected().to_owned())).filter(|t| !t.is_empty())
+            }
+            PrimarySource::Text(text) => text.or_else(|| self.selected_text(app)),
         };
         let Some(text) = text else { return };
         let hash = std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default().hash_one(&text);

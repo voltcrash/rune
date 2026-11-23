@@ -237,7 +237,10 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
             .child(text_input(&s.a, st).key("a").size(300.0, 140.0).on_edit(|s: &mut App| &mut s.a))
             .child(text_input(&s.b, st).key("b").size(300.0, 140.0).on_edit(|s: &mut App| &mut s.b))
             .child(text_input(&s.plain, st).key("plain").size(300.0, 40.0).on_edit(|s: &mut App| &mut s.plain)
-                .input_copy_text(|e| {
+                .input_copy_text_for(|e, destination| {
+                    if destination == crate::CopyDestination::PrimarySelection {
+                        return Some(format!("selected:{}", e.selected()));
+                    }
                     assert!(!e.selected().is_empty(), "no formatter for a collapsed selection");
                     (e.selected() == "chip").then(|| "path/to/chip".to_string())
                 }))
@@ -286,6 +289,14 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
     rt.key(cmd('c'));
     rt.frame(0.0);
     assert_eq!(m.content().unwrap().text(), "path/to/chip");
+    #[cfg(target_os = "linux")]
+    {
+        rt.update(|s, _| s.plain.set_selection(1, 3));
+        { let (core, app) = rt.split_mut(); core.primary_released(&app); }
+        rt.frame(0.0);
+        assert_eq!(rt.edit.primary.write.take().as_deref(), Some("selected:hi"));
+        rt.state.plain.set_selection(0, 4);
+    }
     m.set_content(ClipboardContent::new("previous clipboard"));
     rt.key(cmd('x'));
     rt.frame(0.0);

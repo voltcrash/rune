@@ -468,3 +468,41 @@ fn header_before_virtual_list_keeps_pinned_selection_and_copies_across_unbuilt_r
     let full_expected = full_parts.join("\n");
     assert_eq!(rt.selected_text().as_deref(), Some(full_expected.as_str()));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn primary_release_keeps_virtual_text_when_its_selection_handler_removes_the_rows() {
+    type Rows = Vec<String>;
+    let view = |rows: &Rows, _: &mut Cx<Rows>| {
+        col().w_full().h_full().scroll(ScrollSpec { stick_bottom: false }).child(
+            col().key("rows").w_full().growth(GrowthSpec::default()).selection_group(true)
+                .virtual_rows(rows.len(), ROW_H, |_: &Rows, i| format!("r{i}").into(),
+                    |rows: &Rows, i| text(rows[i].clone()).key("body").h(ROW_H).selectable(true))
+                .on_selection_change(|rows: &mut Rows, change, _| {
+                    if change.selection().is_some() { rows.clear(); }
+                })
+        )
+    };
+    for dirty_during_drag in [false, true] {
+        let rows: Rows = (0..ROWS).map(|i| format!("row {i}")).collect();
+        let expected = rows.join("\n");
+        let mut rt = Runtime::new(rows, view, (320.0, 180.0), Env::new(true, 1.0));
+        tick(&mut rt);
+        rt.update(|_, tx| tx.select_all_text("rows"));
+        tick(&mut rt);
+        if dirty_during_drag {
+            let selected = rt.edit.selectable.phase.selection_mut().unwrap();
+            let (focus, far) = (selected.focus, selected.far.take());
+            rt.split_mut().0.select_step(super::phase::Event::Extend { focus, far });
+            rt.update(|_, tx| assert_eq!(tx.text_selection().unwrap().text(), expected));
+            rt.pointer_up(0., 0.);
+        } else {
+            let (core, app) = rt.split_mut();
+            core.primary_released(&app);
+        }
+        rt.invalidate();
+        tick(&mut rt);
+        assert!(rt.state.is_empty());
+        assert_eq!(rt.edit.primary.write.as_deref(), Some(expected.as_str()));
+    }
+}
