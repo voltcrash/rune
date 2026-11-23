@@ -34,18 +34,32 @@ const TEXT_TYPES: &[&str] = &[
     "TEXT",
 ];
 
+#[derive(Default)]
+struct Device {
+    finished: bool,
+    primary_supported: bool,
+    publishing: bool,
+}
+
 struct State {
     handle: LoopHandle<'static, Self>,
     text: Rc<[u8]>,
-    sources: usize,
+    devices: Vec<Device>,
     transfers: usize,
     transferred: usize,
     owner: Option<Arc<()>>,
     closed: bool,
-    primary_supported: bool,
 }
 
 impl State {
+    fn stop_publishing(&mut self, seat: usize) {
+        if std::mem::take(&mut self.devices[seat].publishing)
+            && !self.devices.iter().any(|device| device.publishing)
+        {
+            self.owner = None;
+        }
+    }
+
     fn send(&mut self, fd: OwnedFd) {
         let Ok(flags) = fcntl_getfl(&fd) else { return };
         if fcntl_setfl(&fd, flags | OFlags::NONBLOCK).is_err() {
@@ -105,21 +119,26 @@ impl Dispatch<WlRegistry, GlobalListContents> for State {
 
 macro_rules! dispatch_data_control {
     ($device:ty, $device_mod:ident, $offer:ty, $source:ty, $source_mod:ident) => {
-        impl Dispatch<$device, ()> for State {
-            fn event(state: &mut Self, _: &$device, event: <$device as Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        impl Dispatch<$device, usize> for State {
+            fn event(state: &mut Self, device: &$device, event: <$device as Proxy>::Event, seat: &usize, _: &Connection, _: &QueueHandle<Self>) {
                 match event {
                     $device_mod::Event::DataOffer { id } => id.destroy(),
-                    $device_mod::Event::PrimarySelection { .. } => state.primary_supported = true,
+                    $device_mod::Event::PrimarySelection { .. } => state.devices[*seat].primary_supported = true,
+                    $device_mod::Event::Finished => {
+                        state.devices[*seat].finished = true;
+                        state.stop_publishing(*seat);
+                        device.destroy();
+                    }
                     _ => {}
                 }
             }
             event_created_child!(State, $device, [$device_mod::EVT_DATA_OFFER_OPCODE => ($offer, ())]);
         }
-        impl Dispatch<$source, ()> for State {
-            fn event(state: &mut Self, source: &$source, event: <$source as Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        impl Dispatch<$source, usize> for State {
+            fn event(state: &mut Self, source: &$source, event: <$source as Proxy>::Event, seat: &usize, _: &Connection, _: &QueueHandle<Self>) {
                 match event {
                     $source_mod::Event::Send { mime_type, fd } if TEXT_TYPES.contains(&mime_type.as_str()) => state.send(fd),
-                    $source_mod::Event::Cancelled => { source.destroy(); state.sources -= 1; if state.sources == 0 { state.owner = None; } }
+                    $source_mod::Event::Cancelled => { source.destroy(); state.stop_publishing(*seat); }
                     _ => {}
                 }
             }
@@ -168,12 +187,11 @@ pub(super) fn serve(
     let mut state = State {
         handle: event_loop.handle(),
         text: Rc::from(text.into_bytes()),
-        sources: 0,
+        devices: seats.iter().map(|_| Device::default()).collect(),
         transfers: 0,
         transferred: 0,
         owner: Some(owner),
         closed: false,
-        primary_supported: false,
     };
     state
         .handle
@@ -183,14 +201,16 @@ pub(super) fn serve(
             let manager = $manager;
             let devices = seats
                 .iter()
-                .map(|seat| manager.get_data_device(seat, &qh, ()))
+                .enumerate()
+                .map(|(index, seat)| manager.get_data_device(seat, &qh, index))
                 .collect::<Vec<_>>();
             queue.roundtrip(&mut state)?;
-            if primary && !state.primary_supported {
-                return Err("the compositor does not support primary selection".into());
-            }
-            for device in devices {
-                let source = manager.create_data_source(&qh, ());
+            for (index, device) in devices.into_iter().enumerate() {
+                let seat = &mut state.devices[index];
+                if seat.finished || (primary && !seat.primary_supported) {
+                    continue;
+                }
+                let source = manager.create_data_source(&qh, index);
                 for mime in TEXT_TYPES {
                     source.offer((*mime).into());
                 }
@@ -199,7 +219,7 @@ pub(super) fn serve(
                 } else {
                     device.set_selection(Some(&source));
                 }
-                state.sources += 1;
+                seat.publishing = true;
             }
         }};
     }
@@ -213,9 +233,12 @@ pub(super) fn serve(
         )?);
     }
     queue.roundtrip(&mut state)?;
+    if !state.devices.iter().any(|device| device.publishing) {
+        return Err("no active Wayland device accepted the selection".into());
+    }
     WaylandSource::new(conn, queue).insert(event_loop.handle())?;
     ready.send(Ok(()))?;
-    while state.sources > 0 && !state.closed {
+    while state.owner.is_some() && !state.closed {
         event_loop.dispatch(None, &mut state)?;
     }
     state.owner = None;

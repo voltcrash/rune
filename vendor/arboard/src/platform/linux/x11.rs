@@ -53,6 +53,9 @@ use super::{
 use crate::ImageData;
 use crate::{common::ScopeGuard, Error};
 
+mod outgoing;
+use outgoing::Transfers;
+
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 static CLIPBOARD: Mutex<Option<GlobalClipboard>> = parking_lot::const_mutex(None);
@@ -177,7 +180,7 @@ impl XContext {
 
 #[derive(Default)]
 struct Selection {
-	data: RwLock<Option<(Vec<ClipboardData>, Option<Arc<()>>)>>,
+	data: RwLock<Option<(Vec<Arc<ClipboardData>>, Option<Arc<()>>)>>,
 	/// Mutex around when this selection was last changed by us
 	/// for both use with the below condvar and logging.
 	mutex: Mutex<Option<Instant>>,
@@ -257,7 +260,7 @@ impl Inner {
 		// Just setting the data, and the `serve_requests` will take care of the rest.
 		let selection = self.selection_of(clipboard_selection);
 		let mut data_guard = selection.data.write();
-		*data_guard = Some((data, owner));
+		*data_guard = Some((data.into_iter().map(Arc::new).collect(), owner));
 
 		// ICCCM version 2, section 2.6.1.3 states that we should re-assert ownership whenever data
 		// changes.
@@ -308,10 +311,10 @@ impl Inner {
 		if self.is_owner(selection)? {
 			let data = self.selection_of(selection).data.read();
 			if let Some((data_list, _)) = &*data {
-				for data in data_list {
+				for data in data_list.iter() {
 					for format in formats {
 						if *format == data.format {
-							return Ok(data.clone());
+							return Ok((**data).clone());
 						}
 					}
 				}
@@ -599,7 +602,7 @@ impl Inner {
 		Ok(false)
 	}
 
-	fn handle_selection_request(&self, event: SelectionRequestEvent) -> Result<()> {
+	fn handle_selection_request(&self, event: SelectionRequestEvent, transfers: &mut Transfers) -> Result<()> {
 		let selection = match self.kind_of(event.selection) {
 			Some(kind) => kind,
 			None => {
@@ -619,7 +622,7 @@ impl Inner {
 				let mut targets = Vec::with_capacity(data_list.len() + 3);
 				let mut excluded = false;
 
-				for data in data_list {
+				for data in data_list.iter() {
 					targets.push(data.format);
 					if data.format == self.atoms.UTF8_STRING {
 						// When we are storing a UTF8 string,
@@ -676,20 +679,13 @@ impl Inner {
 					event.target
 				};
 				success = match data_list.iter().find(|d| d.format == target) {
-					Some(data) => {
-						self.server
-							.conn
-							.change_property8(
-								PropMode::REPLACE,
-								event.requestor,
-								event.property,
-								event.target,
-								&data.bytes,
-							)
-							.map_err(into_unknown)?;
-						self.server.conn.flush().map_err(into_unknown)?;
-						true
-					}
+					Some(data) => match transfers.send(self, event, data) {
+						Ok(()) => true,
+						Err(error) => {
+							warn!("Could not supply selection data: {error}");
+							false
+						}
+					},
 					None => false,
 				};
 			} else {
@@ -830,23 +826,33 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 
 	let mut written = false;
 	let mut notified = false;
+	let mut transfers = Transfers::default();
 
 	loop {
-		match context.server.conn.wait_for_event().map_err(into_unknown)? {
-			Event::DestroyNotify(_) => {
+		let served = match context.server.conn.wait_for_event().map_err(into_unknown)? {
+			Event::DestroyNotify(event) if event.window == context.server.win_id => {
 				// This window is being destroyed.
 				trace!("Clipboard server window is being destroyed x_x");
 				return Ok(());
 			}
+			Event::DestroyNotify(event) => {
+				transfers.forget_window(event.window);
+				continue;
+			}
+			Event::PropertyNotify(event) if event.state == Property::DELETE => {
+				match transfers.advance(&context, event)? {
+					Some(completed) => completed,
+					None => continue,
+				}
+			}
 			Event::SelectionClear(event) => {
-				// TODO: check if this works
-				// Someone else has new content in the clipboard, so it is
-				// notifying us that we should delete our data now.
-				trace!("Somebody else owns the clipboard now");
-
-				if let Some(selection) = context.kind_of(event.selection) {
-					let selection = context.selection_of(selection);
+				if let Some(kind) = context.kind_of(event.selection) {
+					let selection = context.selection_of(kind);
 					let mut data_guard = selection.data.write();
+					// We may have reclaimed the window's selection before processing this event.
+					if context.is_owner(kind)? {
+						continue;
+					}
 					*data_guard = None;
 
 					// It is important that this mutex is locked at the time of calling
@@ -860,6 +866,7 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 					// there's no data to be served anymore, so wake it up.
 					selection.data_served.notify_all();
 				}
+				continue;
 			}
 			Event::SelectionRequest(event) => {
 				trace!(
@@ -868,37 +875,15 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 					context.atom_name_dbg(event.target),
 				);
 				// Someone is requesting the clipboard content from us.
-				if let Err(e) = context.handle_selection_request(event) {
+				if let Err(e) = context.handle_selection_request(event, &mut transfers) {
 					error!("Failed to handle selection request: {e}");
 					continue;
 				}
 
-				if let Some(selection) = context.kind_of(event.selection) {
-					let selection = context.selection_of(selection);
-
-					// It is important that this mutex is locked at the time of calling
-					// `notify_all` to prevent notifications getting lost in case the sleeping
-					// thread has unlocked its `data_guard` and is just about to sleep.
-					let _guard = selection.mutex.lock();
-					// Notify a thread that's waiting on the data to be served once.
-					selection.data_served.notify_all();
+				if transfers.pending(&event) {
+					continue;
 				}
-
-				// if we are in the progress of saving to the clipboard manager
-				// make sure we save that we have finished writing
-				let handover_state = context.handover_state.lock();
-				if *handover_state == ManagerHandoverState::InProgress {
-					// Only set written, when the actual contents were written,
-					// not just a response to what TARGETS we have.
-					if event.target != context.atoms.TARGETS {
-						trace!("The contents were written to the clipboard manager.");
-						written = true;
-						// if we have written and notified, make sure to notify that we are done
-						if notified {
-							handover_finished(&context, handover_state);
-						}
-					}
-				}
+				event
 			}
 			Event::SelectionNotify(event) => {
 				// We've requested the clipboard content and this is the answer.
@@ -927,10 +912,34 @@ fn serve_requests(context: Arc<Inner>) -> Result<(), Box<dyn std::error::Error>>
 						handover_finished(&context, handover_state);
 					}
 				}
+				continue;
 			}
-			_event => {
-				// May be useful for debugging but nothing else really.
-				// trace!("Received unwanted event: {:?}", event);
+			_ => continue,
+		};
+		if let Some(selection) = context.kind_of(served.selection) {
+			let selection = context.selection_of(selection);
+
+			// It is important that this mutex is locked at the time of calling
+			// `notify_all` to prevent notifications getting lost in case the sleeping
+			// thread has unlocked its `data_guard` and is just about to sleep.
+			let _guard = selection.mutex.lock();
+			// Notify a thread that's waiting on the data to be served once.
+			selection.data_served.notify_all();
+		}
+
+		// if we are in the progress of saving to the clipboard manager
+		// make sure we save that we have finished writing
+		let handover_state = context.handover_state.lock();
+		if *handover_state == ManagerHandoverState::InProgress {
+			// Only set written, when the actual contents were written,
+			// not just a response to what TARGETS we have.
+			if served.target != context.atoms.TARGETS {
+				trace!("The contents were written to the clipboard manager.");
+				written = true;
+				// if we have written and notified, make sure to notify that we are done
+				if notified {
+					handover_finished(&context, handover_state);
+				}
 			}
 		}
 	}
@@ -1213,5 +1222,41 @@ impl Drop for Clipboard {
 				}
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod ownership_tests {
+	use super::*;
+
+	#[test]
+	#[ignore = "takes ownership of the clipboard on an isolated X11 display"]
+	fn queued_clear_keeps_a_reclaimed_selection() {
+		let ctx = Arc::new(Inner::new().unwrap());
+		let external = XContext::new().unwrap();
+		let kind = LinuxClipboardKind::Clipboard;
+		let atom = ctx.atom_of(kind);
+		let write = |value: &[u8], token| {
+			let data = ClipboardData { bytes: value.to_vec(), format: ctx.atoms.UTF8_STRING };
+			ctx.write(vec![data], kind, WaitConfig::None, token).unwrap();
+			assert!(ctx.is_owner(kind).unwrap());
+		};
+		write(b"first", None);
+		external.conn.set_selection_owner(external.win_id, atom, Time::CURRENT_TIME)
+			.unwrap().check().unwrap();
+		let token = Arc::new(());
+		let retained = Arc::downgrade(&token);
+		write(b"second", Some(token));
+
+		// Dispatch the real SelectionClear only after the window has reclaimed ownership.
+		let server = std::thread::spawn({
+			let ctx = ctx.clone();
+			move || serve_requests(ctx).unwrap()
+		});
+		let result = ctx.read_single(&external, kind, ctx.atoms.UTF8_STRING);
+		ctx.server.conn.destroy_window(ctx.server.win_id).unwrap().check().unwrap();
+		server.join().unwrap();
+		assert_eq!(result.unwrap(), b"second");
+		assert!(retained.upgrade().is_some());
 	}
 }

@@ -25,23 +25,52 @@
 +
 --- a/src/platform/linux/x11.rs
 +++ b/src/platform/linux/x11.rs
-@@ -180 +180 @@
+@@ -54,0 +55,3 @@
++
++mod outgoing;
++use outgoing::Transfers;
+@@ -180 +183 @@
 -	data: RwLock<Option<Vec<ClipboardData>>>,
-+	data: RwLock<Option<(Vec<ClipboardData>, Option<Arc<()>>)>>,
-@@ -248,0 +249 @@
++	data: RwLock<Option<(Vec<Arc<ClipboardData>>, Option<Arc<()>>)>>,
+@@ -248,0 +252 @@
 +		owner: Option<Arc<()>>,
-@@ -259 +260 @@
+@@ -259 +263 @@
 -		*data_guard = Some(data);
-+		*data_guard = Some((data, owner));
-@@ -309 +310 @@
++		*data_guard = Some((data.into_iter().map(Arc::new).collect(), owner));
+@@ -309,2 +313,2 @@
 -			if let Some(data_list) = &*data {
+-				for data in data_list {
 +			if let Some((data_list, _)) = &*data {
-@@ -616 +617 @@
++				for data in data_list.iter() {
+@@ -313 +317 @@
+-							return Ok(data.clone());
++							return Ok((**data).clone());
+@@ -601 +605 @@
+-	fn handle_selection_request(&self, event: SelectionRequestEvent) -> Result<()> {
++	fn handle_selection_request(&self, event: SelectionRequestEvent, transfers: &mut Transfers) -> Result<()> {
+@@ -616 +620 @@
 -			let (data_targets, excluded) = if let Some(data_list) = &*data {
 +			let (data_targets, excluded) = if let Some((data_list, _)) = &*data {
-@@ -671,2 +672,7 @@
+@@ -621 +625 @@
+-				for data in data_list {
++				for data in data_list.iter() {
+@@ -671,16 +675,14 @@
 -			if let Some(data_list) = &*data {
 -				success = match data_list.iter().find(|d| d.format == event.target) {
+-					Some(data) => {
+-						self.server
+-							.conn
+-							.change_property8(
+-								PropMode::REPLACE,
+-								event.requestor,
+-								event.property,
+-								event.target,
+-								&data.bytes,
+-							)
+-							.map_err(into_unknown)?;
+-						self.server.conn.flush().map_err(into_unknown)?;
+-						true
+-					}
 +			if let Some((data_list, _)) = &*data {
 +				let target = if event.target == self.atoms.UTF8_MIME_0 || event.target == self.atoms.UTF8_MIME_1 {
 +					self.atoms.UTF8_STRING
@@ -49,10 +78,119 @@
 +					event.target
 +				};
 +				success = match data_list.iter().find(|d| d.format == target) {
-@@ -738 +744 @@
++					Some(data) => match transfers.send(self, event, data) {
++						Ok(()) => true,
++						Err(error) => {
++							warn!("Could not supply selection data: {error}");
++							false
++						}
++					},
+@@ -738 +740 @@
 -			Some(data) => {
 +			Some((data, _)) => {
-@@ -996,0 +1003,11 @@
+@@ -826,0 +829 @@
++	let mut transfers = Transfers::default();
+@@ -829,2 +832,2 @@
+-		match context.server.conn.wait_for_event().map_err(into_unknown)? {
+-			Event::DestroyNotify(_) => {
++		let served = match context.server.conn.wait_for_event().map_err(into_unknown)? {
++			Event::DestroyNotify(event) if event.window == context.server.win_id => {
+@@ -834,0 +838,10 @@
++			Event::DestroyNotify(event) => {
++				transfers.forget_window(event.window);
++				continue;
++			}
++			Event::PropertyNotify(event) if event.state == Property::DELETE => {
++				match transfers.advance(&context, event)? {
++					Some(completed) => completed,
++					None => continue,
++				}
++			}
+@@ -836,7 +849,2 @@
+-				// TODO: check if this works
+-				// Someone else has new content in the clipboard, so it is
+-				// notifying us that we should delete our data now.
+-				trace!("Somebody else owns the clipboard now");
+-
+-				if let Some(selection) = context.kind_of(event.selection) {
+-					let selection = context.selection_of(selection);
++				if let Some(kind) = context.kind_of(event.selection) {
++					let selection = context.selection_of(kind);
+@@ -843,0 +852,4 @@
++					// We may have reclaimed the window's selection before processing this event.
++					if context.is_owner(kind)? {
++						continue;
++					}
+@@ -856,0 +869 @@
++				continue;
+@@ -865 +878 @@
+-				if let Err(e) = context.handle_selection_request(event) {
++				if let Err(e) = context.handle_selection_request(event, &mut transfers) {
+@@ -870,26 +883,4 @@
+-				if let Some(selection) = context.kind_of(event.selection) {
+-					let selection = context.selection_of(selection);
+-
+-					// It is important that this mutex is locked at the time of calling
+-					// `notify_all` to prevent notifications getting lost in case the sleeping
+-					// thread has unlocked its `data_guard` and is just about to sleep.
+-					let _guard = selection.mutex.lock();
+-					// Notify a thread that's waiting on the data to be served once.
+-					selection.data_served.notify_all();
+-				}
+-
+-				// if we are in the progress of saving to the clipboard manager
+-				// make sure we save that we have finished writing
+-				let handover_state = context.handover_state.lock();
+-				if *handover_state == ManagerHandoverState::InProgress {
+-					// Only set written, when the actual contents were written,
+-					// not just a response to what TARGETS we have.
+-					if event.target != context.atoms.TARGETS {
+-						trace!("The contents were written to the clipboard manager.");
+-						written = true;
+-						// if we have written and notified, make sure to notify that we are done
+-						if notified {
+-							handover_finished(&context, handover_state);
+-						}
+-					}
+-				}
++				if transfers.pending(&event) {
++					continue;
++				}
++				event
+@@ -924,4 +915,28 @@
+-			}
+-			_event => {
+-				// May be useful for debugging but nothing else really.
+-				// trace!("Received unwanted event: {:?}", event);
++				continue;
++			}
++			_ => continue,
++		};
++		if let Some(selection) = context.kind_of(served.selection) {
++			let selection = context.selection_of(selection);
++
++			// It is important that this mutex is locked at the time of calling
++			// `notify_all` to prevent notifications getting lost in case the sleeping
++			// thread has unlocked its `data_guard` and is just about to sleep.
++			let _guard = selection.mutex.lock();
++			// Notify a thread that's waiting on the data to be served once.
++			selection.data_served.notify_all();
++		}
++
++		// if we are in the progress of saving to the clipboard manager
++		// make sure we save that we have finished writing
++		let handover_state = context.handover_state.lock();
++		if *handover_state == ManagerHandoverState::InProgress {
++			// Only set written, when the actual contents were written,
++			// not just a response to what TARGETS we have.
++			if served.target != context.atoms.TARGETS {
++				trace!("The contents were written to the clipboard manager.");
++				written = true;
++				// if we have written and notified, make sure to notify that we are done
++				if notified {
++					handover_finished(&context, handover_state);
++				}
+@@ -996,0 +1012,11 @@
 +		self.set_text_with_owner(message, selection, wait, exclude_from_history, None)
 +	}
 +
@@ -64,15 +202,161 @@
 +		exclude_from_history: bool,
 +		owner: Option<Arc<()>>,
 +	) -> Result<()> {
-@@ -1005 +1022 @@
+@@ -1005 +1031 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, owner)
-@@ -1043 +1060 @@
+@@ -1043 +1069 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, None)
-@@ -1079 +1096 @@
+@@ -1079 +1105 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, None)
-@@ -1101 +1118 @@
+@@ -1101 +1127 @@
 -		self.inner.write(data, selection, wait)
 +		self.inner.write(data, selection, wait, None)
+@@ -1200,0 +1227,36 @@
++
++#[cfg(test)]
++mod ownership_tests {
++	use super::*;
++
++	#[test]
++	#[ignore = "takes ownership of the clipboard on an isolated X11 display"]
++	fn queued_clear_keeps_a_reclaimed_selection() {
++		let ctx = Arc::new(Inner::new().unwrap());
++		let external = XContext::new().unwrap();
++		let kind = LinuxClipboardKind::Clipboard;
++		let atom = ctx.atom_of(kind);
++		let write = |value: &[u8], token| {
++			let data = ClipboardData { bytes: value.to_vec(), format: ctx.atoms.UTF8_STRING };
++			ctx.write(vec![data], kind, WaitConfig::None, token).unwrap();
++			assert!(ctx.is_owner(kind).unwrap());
++		};
++		write(b"first", None);
++		external.conn.set_selection_owner(external.win_id, atom, Time::CURRENT_TIME)
++			.unwrap().check().unwrap();
++		let token = Arc::new(());
++		let retained = Arc::downgrade(&token);
++		write(b"second", Some(token));
++
++		// Dispatch the real SelectionClear only after the window has reclaimed ownership.
++		let server = std::thread::spawn({
++			let ctx = ctx.clone();
++			move || serve_requests(ctx).unwrap()
++		});
++		let result = ctx.read_single(&external, kind, ctx.atoms.UTF8_STRING);
++		ctx.server.conn.destroy_window(ctx.server.win_id).unwrap().check().unwrap();
++		server.join().unwrap();
++		assert_eq!(result.unwrap(), b"second");
++		assert!(retained.upgrade().is_some());
++	}
++}
+--- /dev/null
++++ b/src/platform/linux/x11/outgoing.rs
+@@ -0,0 +1,106 @@
++// SPDX-License-Identifier: Apache-2.0 OR MIT
++use super::*;
++use x11rb::protocol::xproto::{ChangeWindowAttributesAux, Window};
++
++struct Transfer {
++	request: SelectionRequestEvent,
++	data: Arc<ClipboardData>,
++	offset: usize,
++}
++
++#[derive(Default)]
++pub(super) struct Transfers(HashMap<(Window, Atom), Transfer>);
++
++impl Transfers {
++	fn chunk_size(ctx: &Inner) -> usize {
++		// Use the core request limit, leaving space for the ChangeProperty header.
++		usize::from(ctx.server.conn.setup().maximum_request_length) * 4 - 24
++	}
++
++	pub(super) fn pending(&self, request: &SelectionRequestEvent) -> bool {
++		self.0.contains_key(&(request.requestor, request.property))
++	}
++
++	pub(super) fn send(
++		&mut self,
++		ctx: &Inner,
++		request: SelectionRequestEvent,
++		data: &Arc<ClipboardData>,
++	) -> Result<()> {
++		let conn = &ctx.server.conn;
++		let window = request.requestor;
++		if data.bytes.len() <= Self::chunk_size(ctx) {
++			conn.change_property8(
++				PropMode::REPLACE,
++				window,
++				request.property,
++				request.target,
++				&data.bytes,
++			)
++			.map_err(into_unknown)?
++			.check()
++			.map_err(into_unknown)?;
++			return Ok(());
++		}
++
++		let mask = EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY;
++		conn.change_window_attributes(window, &ChangeWindowAttributesAux::new().event_mask(mask))
++			.map_err(into_unknown)?
++			.check()
++			.map_err(into_unknown)?;
++		let len = u32::try_from(data.bytes.len()).unwrap_or(u32::MAX);
++		conn.change_property32(PropMode::REPLACE, window, request.property, ctx.atoms.INCR, &[len])
++			.map_err(into_unknown)?
++			.check()
++			.map_err(into_unknown)?;
++		self.0.insert(
++			(window, request.property),
++			Transfer { request, data: data.clone(), offset: 0 },
++		);
++		Ok(())
++	}
++
++	pub(super) fn advance(
++		&mut self,
++		ctx: &Inner,
++		event: PropertyNotifyEvent,
++	) -> Result<Option<SelectionRequestEvent>> {
++		let Entry::Occupied(mut entry) = self.0.entry((event.window, event.atom)) else {
++			return Ok(None);
++		};
++		let transfer = entry.get_mut();
++		let end = transfer.data.bytes.len().min(transfer.offset + Self::chunk_size(ctx));
++		let bytes = &transfer.data.bytes[transfer.offset..end];
++		let conn = &ctx.server.conn;
++		conn.change_property8(
++			PropMode::APPEND,
++			event.window,
++			event.atom,
++			transfer.request.target,
++			bytes,
++		)
++		.map_err(into_unknown)?;
++		transfer.offset = end;
++		let completed = if bytes.is_empty() {
++			let request = entry.remove().request;
++			if event.window != ctx.server.win_id
++				&& !self.0.keys().any(|(window, _)| *window == event.window)
++			{
++				conn.change_window_attributes(
++					event.window,
++					&ChangeWindowAttributesAux::new().event_mask(EventMask::NO_EVENT),
++				)
++				.map_err(into_unknown)?;
++			}
++			Some(request)
++		} else {
++			None
++		};
++		conn.flush().map_err(into_unknown)?;
++		Ok(completed)
++	}
++
++	pub(super) fn forget_window(&mut self, window: Window) {
++		self.0.retain(|(requestor, _), _| *requestor != window);
++	}
++}
