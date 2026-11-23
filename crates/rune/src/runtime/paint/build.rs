@@ -636,7 +636,7 @@ impl RuntimeCore {
         // geometry without inventing pointer-move or drag events on animation frames. Tooltips
         // follow the hold this decides.
         let queued = self.frame.queue.len();
-        let held = self.pointer.pos.map(|(x, y)| self.refresh_hover(x, y));
+        let held = self.pointer.pos.map(|(x, y)| self.refresh_hover(x, y, false));
         self.frame.queue.observe_since(queued);
         self.update_help();
         self.paint.layer_scratch = layers;

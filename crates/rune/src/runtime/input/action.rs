@@ -11,7 +11,7 @@ pub(in crate::runtime) enum Action {
     HoverFocus(Option<String>),
     Dismiss(String),
     PointerMove(String, PointerEvent),
-    Hover(String),
+    Hover(String, bool),
     HoverChange(String, bool),
     /// `El::on_selection_change`.
     SelectionChange(String, crate::SelectionChange),
@@ -140,7 +140,8 @@ pub(in crate::runtime) fn live_only_handler(action: &Action) -> Option<&'static 
         Action::Visible(..) => "on_visible",
         Action::Layout(..) => "on_layout_tx",
         Action::PointerMove(..) => "on_pointer_move_local",
-        Action::Hover(_) => "on_hover",
+        Action::Hover(_, false) => "on_hover",
+        Action::Hover(_, true) => "on_point",
         Action::HoverChange(..) => "on_hover_change",
         Action::SelectionChange(..) => "on_selection_change",
         Action::Press(..) => "on_press",
@@ -165,7 +166,7 @@ pub(in crate::runtime) fn live_only_handler(action: &Action) -> Option<&'static 
 #[cfg(debug_assertions)]
 pub(in crate::runtime) fn action_path(action: &Action) -> Option<&str> {
     match action {
-        Action::PointerMove(path, _) | Action::DrawnLayout(path, ..) | Action::Layout(path, _) | Action::Hover(path) | Action::HoverChange(path, _) | Action::SelectionChange(path, _) | Action::Press(path, ..) | Action::DoublePress(path) | Action::MiddlePress(path)
+        Action::PointerMove(path, _) | Action::DrawnLayout(path, ..) | Action::Layout(path, _) | Action::Hover(path, _) | Action::HoverChange(path, _) | Action::SelectionChange(path, _) | Action::Press(path, ..) | Action::DoublePress(path) | Action::MiddlePress(path)
         | Action::Link(path, ..) | Action::LinkSecondary(path, ..) | Action::SecondaryPress(path, _) | Action::Drag(path, ..) | Action::DragRepeat(path, ..) | Action::DragStart(path)
         | Action::DragEnd(path, _) | Action::Visible(path, _) => Some(path),
         Action::Wheel { chain, .. } | Action::Gesture(chain, _) => chain.first().map(String::as_str),
@@ -308,7 +309,7 @@ impl RuntimeCore {
     fn handler_location(&self, action: &Action) -> Option<&'static std::panic::Location<'static>> {
         let sites = |path: &str| self.node(path).map(|n| n.handlers.sites);
         match action {
-            Action::Hover(p) => sites(p)?.hover,
+            Action::Hover(p, _) => sites(p)?.hover,
             Action::HoverChange(p, _) => sites(p)?.hover_change,
             Action::PointerMove(p, _) => sites(p)?.pointer_move,
             Action::Layout(p, _) => sites(p)?.layout,
@@ -406,8 +407,8 @@ impl RuntimeCore {
                 f(app.states(), on, &mut one);
                 true
             }
-            Action::Hover(path) => {
-                let Some(f) = self.node(&path).and_then(|n| n.handlers.on_hover.clone()) else { return false };
+            Action::Hover(path, motion) => {
+                let Some(f) = self.node(&path).filter(|n| n.handlers.hover_on_motion == motion).and_then(|n| n.handlers.on_hover.clone()) else { return false };
                 f(app.states(), &mut one);
                 true
             }

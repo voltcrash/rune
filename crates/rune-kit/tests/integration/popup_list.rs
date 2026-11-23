@@ -10,6 +10,8 @@ struct State {
     hovered: Vec<usize>,
     chosen: Vec<String>,
     animate: bool,
+    swap_options: bool,
+    pointer_navigation: bool,
 }
 
 fn item_for(k: &Kit, i: usize) -> PopupItem {
@@ -44,19 +46,22 @@ fn view(s: &State, _: &mut Cx<State>) -> El {
         })
         .build(&k)
         .key("composer");
-    let items: Vec<_> = (0..s.count).map(|i| item_for(&k, i)).collect();
-    PopupList::new("commands", "composer")
+    let mut items: Vec<_> = (0..s.count).map(|i| item_for(&k, i)).collect();
+    if s.swap_options { items.swap(0, 2); }
+    let list = PopupList::new("commands", "composer")
         .anchored("composer", Side::Bottom, Align::Start, 4.0)
         .open(s.open)
         .animate_filtering(s.animate)
         .items(items)
         .active(s.active)
         .empty_message("No matching commands")
-        .label("Commands")
-        .on_active(|s: &mut State, i| {
-            s.active = Some(i);
-            s.hovered.push(i);
-        })
+        .label("Commands");
+    let activate = |s: &mut State, i| {
+        s.active = Some(i);
+        s.hovered.push(i);
+    };
+    let list = if s.pointer_navigation { list.on_point(activate) } else { list.on_active(activate) };
+    list
         .on_choose(|s: &mut State, id, _| {
             s.chosen.push(id.into());
         })
@@ -253,6 +258,26 @@ fn hover_fires_on_active_click_fires_on_choose_and_outside_text_edit_keeps_focus
 }
 
 #[test]
+fn moving_an_option_under_a_stationary_pointer_preserves_the_keyboard_choice() {
+    let mut rt = runtime(4);
+    rt.update(|s, _| s.pointer_navigation = true);
+    for _ in 0..60 { rt.frame(1.0 / 60.0); }
+    let (x, y) = rt.find("commands-option-cmd-2").unwrap();
+    rt.pointer_move(x, y);
+    rt.frame(0.0);
+    assert_eq!(rt.state.active, Some(2));
+    rt.update(|s, _| { s.active = Some(3); s.swap_options = true; });
+    for _ in 0..60 { rt.frame(1.0 / 60.0); }
+    assert_eq!(rt.state.active, Some(3));
+    rt.pointer_up(x, y);
+    rt.frame(0.0);
+    assert_eq!(rt.state.active, Some(3), "a stationary release is not navigation");
+    rt.pointer_move(x + 1.0, y);
+    rt.frame(0.0);
+    assert_eq!(rt.state.active, Some(2));
+}
+
+#[test]
 fn hover_changes_do_not_scroll_now_or_on_the_next_frame() {
     let mut rt = runtime(40);
     for _ in 0..60 { rt.frame(1.0 / 60.0); }
@@ -266,6 +291,13 @@ fn hover_changes_do_not_scroll_now_or_on_the_next_frame() {
     let after = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("commands-option-cmd-8")).unwrap().rect;
     assert_eq!(before, after, "hovering a partly clipped row must not reveal it");
     assert_eq!(rt.state.hovered, [8]);
+    rt.update(|s, _| { s.pointer_navigation = true; s.active = Some(7); });
+    rt.frame(0.0);
+    rt.pointer_move(x + 1.0, y);
+    for _ in 0..4 { rt.frame(1.0 / 60.0); }
+    assert_eq!(rt.state.active, Some(8));
+    let after_motion = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("commands-option-cmd-8")).unwrap().rect;
+    assert_eq!(before, after_motion, "pointing inside the same partly clipped row must not reveal it");
 }
 
 #[test]

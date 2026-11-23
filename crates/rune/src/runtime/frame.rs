@@ -231,7 +231,7 @@ impl RuntimeCore {
         let mut clipboard_input = ActionQueue::default().into_iter();
         while let Some(Queued { action, at, input }) = clipboard_input.next().or_else(|| host_input.next()) {
             if matches!(action, Action::Key { stage: false, .. } | Action::Physical(crate::PhysicalInput::Key { pressed: true, .. }, _)) { crate::marks::input_handled(true); }
-            pointer_hover |= matches!(action, Action::Hover(_));
+            pointer_hover |= matches!(action, Action::Hover(..));
             // The user's own key or press takes over from a `Tx::focus_when_shown` still waiting.
             if matches!(action, Action::Key { stage: false, .. } | Action::Physical(crate::PhysicalInput::Key { pressed: true, .. }, _) | Action::Press(..) | Action::Focus(..)) {
                 self.kbd.focus_owed = None;

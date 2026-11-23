@@ -100,13 +100,16 @@ impl capture::PointerState {
 impl RuntimeCore {
     /// Hover under the pointer at (x, y): what's hovered and what it's inside. Returns whether
     /// moving layout holds hover this pass, for the `update_interaction` that follows.
-    pub(in crate::runtime) fn refresh_hover(&mut self, x: f32, y: f32) -> bool {
+    pub(in crate::runtime) fn refresh_hover(&mut self, x: f32, y: f32, moved: bool) -> bool {
         if self.pointer.hover_hold.released() && !self.layout_moving() { self.pointer.hover_hold.settled(); }
         let hovered = self.primary_target(x, y);
         let within = self.within_next();
         let held = self.decide_hold(hovered, within.as_ref(), None);
         self.pointer.hover_hold.set_held(held);
         if let Some((inside, _)) = within { self.apply_within(inside, held); }
+        if moved && !held && let Some(i) = hovered && self.tree.nodes[i].handlers.hover_on_motion {
+            self.frame.queue.push(Action::Hover(self.tree.nodes[i].path.clone(), true));
+        }
         self.apply_hovered(hovered, held);
         held
     }
@@ -125,7 +128,9 @@ impl RuntimeCore {
         if held { hovered = self.pointer.hovered.as_deref().and_then(|p| self.hover_live(p)); }
         if hovered.map(|i| self.tree.nodes[i].path.as_str()) == self.pointer.hovered.as_deref() { return; }
         self.pointer.hovered = hovered.map(|i| self.tree.nodes[i].path.clone());
-        if let Some(path) = &self.pointer.hovered { self.frame.queue.push(Action::Hover(path.clone())); }
+        if let Some(i) = hovered && !self.tree.nodes[i].handlers.hover_on_motion {
+            self.frame.queue.push(Action::Hover(self.tree.nodes[i].path.clone(), false));
+        }
         // A row never takes focus from a text field (a search field above its results).
         let row = hovered.and_then(|i| self.highlight_row(i)).filter(|_| self.focused_input().is_none());
         match row {
