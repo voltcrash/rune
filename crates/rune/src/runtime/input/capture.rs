@@ -178,7 +178,7 @@ impl Secondary {
         }
     }
 
-    pub(crate) fn is_held(&self) -> bool { matches!(self, Self::Held { .. }) }
+    pub(crate) fn is_held(&self) -> bool { !matches!(self, Self::Up) }
 }
 
 /// Pointer position, button capture, hover/tooltip tracking, touch, autoscroll, file drops and OS
@@ -201,6 +201,7 @@ pub(in crate::runtime) struct PointerState {
     pub(super) press: Press,
     /// The secondary button's press, held beside it.
     secondary: Secondary,
+    pub(super) secondary_pointer: Option<(String, bool)>,
     /// The middle or secondary button's pressed look (`capture::Tint`).
     tint: Tint,
     /// Elements with `hover_delays`: which heard the enter, and which wait out a delay.
@@ -236,6 +237,7 @@ impl PointerState {
             pos: None,
             press: Default::default(),
             secondary: Default::default(),
+            secondary_pointer: None,
             tint: Default::default(),
             press_clicks: Default::default(),
             press_repeat: Default::default(),
@@ -268,12 +270,12 @@ impl PointerState {
     /// waits for the release.
     #[inline]
     pub(in crate::runtime) fn captured(&self) -> bool {
-        self.press.is_held() || self.secondary.is_held() || self.tint.path().is_some()
+        self.press.is_held() || self.secondary_held() || self.tint.path().is_some()
     }
 
     #[inline]
     pub(super) fn captured_path(&self) -> Option<&str> {
-        self.press.path().or(self.secondary.path())
+        self.press.path().or(self.secondary.path()).or_else(|| self.secondary_pointer.as_ref().map(|(path, _)| path.as_str()))
     }
 
     #[inline]
@@ -290,6 +292,7 @@ impl PointerState {
     pub(super) fn set_left(&mut self, out: bool) {
         if let Some(held) = self.press.held_mut() { held.left = out; }
         if let Secondary::Held { left, .. } = &mut self.secondary { *left = out; }
+        if let Some((_, left)) = &mut self.secondary_pointer { *left = out; }
     }
 
     /// The host moved its window by `(dx, dy)` points under a still pointer.
@@ -350,7 +353,7 @@ impl PointerState {
     }
 
     #[inline]
-    pub(super) fn secondary_held(&self) -> bool { self.secondary.is_held() }
+    pub(super) fn secondary_held(&self) -> bool { self.secondary.is_held() || self.secondary_pointer.is_some() }
 
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline]
@@ -369,6 +372,7 @@ impl PointerState {
     /// swaps views.
     pub(in crate::runtime) fn clear_for_stage(&mut self) {
         self.press = Press::default();
+        self.secondary_pointer = None;
         self.secondary = Secondary::Up;
         self.hovered = None;
         self.hover_gone.clear();

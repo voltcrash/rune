@@ -119,6 +119,11 @@ impl PointerButton {
     }
 }
 
+/// A secondary pointer gesture, including an end caused by the host taking the pointer away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerPhase { Down, Move, Up, Cancel }
+
+type SecondaryPointerFn = Rc<dyn Fn(crate::states::States<'_>, PointerPhase, crate::PointerEvent, &mut Tx)>;
 type WheelFn = Rc<dyn Fn(crate::states::States<'_>, WheelEvent, &mut Tx) -> bool>;
 type MagnifyFn = Rc<dyn Fn(crate::states::States<'_>, MagnifyEvent, &mut Tx) -> bool>;
 type RotateFn = Rc<dyn Fn(crate::states::States<'_>, RotateEvent, &mut Tx) -> bool>;
@@ -127,6 +132,7 @@ type SmartMagnifyFn = Rc<dyn Fn(crate::states::States<'_>, f32, f32, &mut Tx) ->
 /// An element's canvas handlers, boxed: few elements have any.
 #[derive(Clone, Default)]
 pub(crate) struct CanvasInput {
+    pub secondary_pointer: Option<SecondaryPointerFn>,
     pub wheel: Option<WheelFn>,
     pub magnify: Option<MagnifyFn>,
     pub rotate: Option<RotateFn>,
@@ -138,7 +144,7 @@ pub(crate) struct CanvasInput {
 impl CanvasInput {
     /// It takes a gesture, so it hit-tests like an element with a press handler.
     pub(crate) fn takes_gestures(&self) -> bool {
-        self.wheel.is_some() || self.magnify.is_some() || self.rotate.is_some() || self.smart_magnify.is_some()
+        self.secondary_pointer.is_some() || self.wheel.is_some() || self.magnify.is_some() || self.rotate.is_some() || self.smart_magnify.is_some()
     }
 }
 
@@ -185,6 +191,15 @@ impl El {
     /// its own layout points (as [`WheelEvent::x`] and `y`): return true to take it.
     pub fn on_smart_magnify<S: 'static>(mut self, f: impl Fn(&mut S, f32, f32, &mut Tx) -> bool + 'static) -> Self {
         self.canvas_input().smart_magnify = Some(Rc::new(move |s, x, y, tx| f(state::<S>(s), x, y, tx)));
+        self
+    }
+
+    /// Tracks the physical secondary button independently of a primary or middle drag. The
+    /// press owns its moves and release even outside the element. The host cancelling the
+    /// gesture delivers `Cancel`. [`Tx::mods`] reports the modifiers at each event.
+    /// Keyboard and touch context menus still use [`El::on_secondary_press`].
+    pub fn on_secondary_pointer<S: 'static>(mut self, f: impl Fn(&mut S, PointerPhase, crate::PointerEvent, &mut Tx) + 'static) -> Self {
+        self.canvas_input().secondary_pointer = Some(Rc::new(move |s, phase, point, tx| f(state::<S>(s), phase, point, tx)));
         self
     }
 

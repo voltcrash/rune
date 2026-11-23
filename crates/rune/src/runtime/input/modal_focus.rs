@@ -141,6 +141,7 @@ impl RuntimeCore {
             match effect {
                 ModalEffect::CancelGestures => {
                     self.drop_press();
+                    self.cancel_secondary_pointer();
                     self.pointer.clear_secondary();
                     self.pointer.hovered = None;
                 }

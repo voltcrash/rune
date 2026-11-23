@@ -148,6 +148,8 @@ pub(crate) fn mouse_button_core(
             }
         }
         ButtonAction::PrimaryUp => rt.pointer_up(app, input.x, input.y),
+        ButtonAction::SecondaryDown | ButtonAction::SecondaryUp if input.button == crate::PointerButton::Primary =>
+            rt.control_click(app, input.x, input.y, input.pressed),
         ButtonAction::SecondaryDown => rt.secondary_down(input.x, input.y),
         ButtonAction::SecondaryUp => rt.secondary_up(app, input.x, input.y),
         ButtonAction::OtherDown(b) => rt.button_down(app, input.x, input.y, b),

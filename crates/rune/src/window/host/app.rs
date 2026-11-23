@@ -135,6 +135,10 @@ impl dyn WindowApp + '_ {
         self.driver(|rt, app| rt.pointer_up(app, x, y));
     }
 
+    pub(in crate::window) fn control_click(&mut self, x: f32, y: f32, down: bool) {
+        self.driver(|rt, app| rt.control_click(app, x, y, down));
+    }
+
     pub(in crate::window) fn secondary_up(&mut self, x: f32, y: f32) {
         self.driver(|rt, app| rt.secondary_up(app, x, y));
     }

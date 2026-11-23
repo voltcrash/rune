@@ -25,6 +25,7 @@ impl RuntimeCore {
                 self.frame.queue.push(Action::PointerMove(self.tree.nodes[i].path.clone(), point));
             }
         }
+        if moved && drag_move { self.secondary_pointer_event(crate::PointerPhase::Move, x, y); }
         self.refresh_hover(x, y, moved);
         let Some(held) = self.pointer.press.held() else { return };
         let (path, d, at, button) = (held.path.clone(), held.drag, held.at, held.button);
@@ -111,6 +112,7 @@ impl RuntimeCore {
         self.drop_drag_out_request();
         self.edit.input_click.clear();
         self.drop_press();
+        self.cancel_secondary_pointer();
         self.pointer.clear_secondary();
         self.pointer.clear_tint();
         self.pointer_leave();

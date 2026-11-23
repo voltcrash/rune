@@ -22,7 +22,7 @@ impl RuntimeCore {
         loop {
             let n = &self.tree.nodes[index];
             if self.subtree_exiting(index) || !self.allowed(index) { break; }
-            if (physical && self.captures_secondary(index)) || n.handlers.on_secondary_press.is_some() || self.secondary_link_at(index, x, y).is_some() { return Some(&n.path); }
+            if (physical && (self.secondary_pointer_handler(index) || self.captures_secondary(index))) || n.handlers.on_secondary_press.is_some() || self.secondary_link_at(index, x, y).is_some() { return Some(&n.path); }
             // A text field's own menu (`field_menu`) wins over its ancestors'.
             if n.input.as_ref().is_some_and(|i| i.access.is_some()) { return Some(&n.path); }
             if text.is_none() && self.is_selectable(index) { text = Some(n.path.as_str()); }
@@ -30,6 +30,28 @@ impl RuntimeCore {
             index = p;
         }
         text
+    }
+
+    fn secondary_pointer_handler(&self, i: usize) -> bool {
+        self.tree.nodes[i].handlers.gestures.as_ref().is_some_and(|g| g.secondary_pointer.is_some())
+    }
+
+    pub(super) fn secondary_pointer_event(&mut self, phase: crate::PointerPhase, x: f32, y: f32) -> bool {
+        let Some((path, left)) = &self.pointer.secondary_pointer else { return false };
+        let left = *left;
+        if let Some(i) = self.live_index(path) {
+            self.frame.queue.push(Action::SecondaryPointer(path.clone(), phase, self.pointer_event(i, x, y), self.kbd.held_mods));
+        }
+        if matches!(phase, crate::PointerPhase::Up | crate::PointerPhase::Cancel) {
+            self.pointer.secondary_pointer = None;
+            self.pointer.release_tint(crate::PointerButton::Secondary);
+            if !self.pointer.captured() { self.leave_after_release(left); }
+        }
+        true
+    }
+
+    pub(in crate::runtime) fn cancel_secondary_pointer(&mut self) {
+        if let Some((x, y)) = self.pointer.pos { self.secondary_pointer_event(crate::PointerPhase::Cancel, x, y); }
     }
 
     fn captures_secondary(&self, i: usize) -> bool {
@@ -40,6 +62,10 @@ impl RuntimeCore {
     /// Capture a secondary gesture without activating primary actions or text selection.
     pub fn secondary_down(&mut self, x: f32, y: f32) {
         self.begin_secondary(x, y, true);
+    }
+
+    pub(crate) fn control_click(&mut self, app: &dyn ViewDriver, x: f32, y: f32, down: bool) {
+        if down { self.begin_secondary(x, y, false); } else { self.release_menu(app, x, y, false); }
     }
 
     pub(super) fn touch_context_menu(&mut self, app: &dyn ViewDriver, x: f32, y: f32) {
@@ -56,6 +82,11 @@ impl RuntimeCore {
         self.dismiss_help();
         let path = self.secondary_target(x, y, physical).map(str::to_owned);
         let i = path.as_ref().and_then(|p| self.tree.nodes.iter().position(|n| n.path == *p));
+        if let Some(i) = i.filter(|&i| physical && self.secondary_pointer_handler(i)) {
+            self.pointer.secondary_pointer = Some((self.tree.nodes[i].path.clone(), false));
+            self.secondary_pointer_event(crate::PointerPhase::Down, x, y);
+            return;
+        }
         if let Some(i) = i.filter(|&i| physical && self.captures_secondary(i)) {
             if !self.pointer.press.is_held() { self.capture_button(i, x, y, crate::PointerButton::Secondary, None); }
             return;
@@ -84,11 +115,12 @@ impl RuntimeCore {
     }
 
     /// What the secondary press being held is on, for a browser that shows its own context
-    /// menu: `"app"` when an element's menu or a link's takes it (Rune draws that), `"field"` on
-    /// a text field, `"text"` on selectable text alone, `""` on nothing of Rune's.
+    /// menu: `"canvas"` on a physical pointer handler, `"app"` on an element or link menu,
+    /// `"field"` on a text field, `"text"` on selectable text alone, or `""` elsewhere.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn secondary_claim(&self) -> &'static str {
-        if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) { return "app"; }
+    pub(crate) fn secondary_claim(&self, physical: bool) -> &'static str {
+        if physical && self.pointer.secondary_pointer.is_some() { return "canvas"; }
+        if physical && self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) { return "app"; }
         let capture::Secondary::Held { path, link, .. } = self.pointer.secondary() else { return "" };
         let Some(n) = self.tree.nodes.iter().find(|n| n.path == *path) else { return "" };
         if link.is_some() || n.handlers.on_secondary_press.is_some() { return "app"; }
@@ -118,15 +150,20 @@ impl RuntimeCore {
     /// The secondary press went to the browser's own menu: its release opens none of Rune's.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     #[inline]
-    pub(crate) fn secondary_abandon(&mut self) {
+    pub(crate) fn secondary_abandon(&mut self, physical: bool) {
         self.pointer.abandon_secondary();
-        if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
+        if physical && self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
             if !self.cancel_drag() { self.drop_press(); }
             self.pointer.release_tint(crate::PointerButton::Secondary);
         }
     }
 
     pub(crate) fn secondary_up(&mut self, app: &dyn ViewDriver, x: f32, y: f32) {
+        if self.pointer.secondary_pointer.is_some() {
+            if self.pointer.pos != Some((x, y)) { self.move_pointer(app, x, y, true); }
+            self.secondary_pointer_event(crate::PointerPhase::Up, x, y);
+            return;
+        }
         if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
             self.pointer.release_tint(crate::PointerButton::Secondary);
             self.release_capture(app, x, y);
@@ -158,7 +195,7 @@ impl RuntimeCore {
                 _ => {}
             }
         }
-        self.leave_after_release(left);
+        if !self.pointer.captured() { self.leave_after_release(left); }
     }
 
     /// A secondary press at (x, y) on text field `path` with no `on_secondary_press` of its own:

@@ -109,6 +109,10 @@ impl dyn OverlayApp + '_ {
         self.driver(|rt, app| rt.pointer_release_lost(app, x, y));
     }
 
+    pub(super) fn control_click(&mut self, x: f32, y: f32, down: bool) {
+        self.driver(|rt, app| rt.control_click(app, x, y, down));
+    }
+
     pub(super) fn secondary_up(&mut self, x: f32, y: f32) {
         self.driver(|rt, app| rt.secondary_up(app, x, y));
     }

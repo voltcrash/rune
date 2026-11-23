@@ -337,22 +337,32 @@ export function mount(canvas, callback, embedded, fitHeight, page) {
     }
     // Right-click (and Ctrl+click on macOS): Rune draws an element's own menu; anywhere else the
     // browser opens its own over what a page would have there (the selection, a link, text, a text
-    // field), never the canvas's image menu; Shift+right-click always opens the browser's. Armed
+    // field). A physical canvas handler keeps its gesture, including Shift+right-click. Armed
     // before the menu's event, which on Windows and Linux follows the release; macOS's follows the
     // press, which Rune has just heard (`syncSecondary`).
     const isSecondaryPress = event => event.button === 2 || (MAC && event.button === 0 && event.ctrlKey);
     const armAt = event => {
         if (!isSecondaryPress(event) || event.pointerType === 'touch' || event.target !== canvas) return;
-        if (armMenu(h, event.clientX, event.clientY, event.shiftKey)) send({ kind: 'secondary_browser' });
+        if (armMenu(h, event.clientX, event.clientY, event.shiftKey)) send({ kind: 'secondary_browser', physical: event.button === 2 });
     };
-    if (MAC) listen(canvas, 'pointerdown', armAt);
-    else listen(window, 'pointerup', armAt, { capture: true });
+    if (MAC) {
+        listen(canvas, 'pointerdown', armAt);
+        listen(canvas, 'pointermove', event => {
+            // Pointer Events report a button change during another button's hold as a move.
+            if ((event.button === 0 && (event.buttons & 1)) || (event.button === 2 && (event.buttons & 2))) armAt(event);
+        });
+    } else {
+        listen(window, 'pointerup', armAt, { capture: true });
+        listen(window, 'pointermove', event => {
+            if (event.button === 2 && !(event.buttons & 2)) armAt(event);
+        }, { capture: true });
+    }
     listen(document, 'contextmenu', event => {
-        if (h.menu === 'rune' || event.target === canvas) event.preventDefault();
-        if (h.menu === 'rune') h.menu = '';
+        if (event.target === canvas || (h.runeContext && ownsTarget(event.target))) event.preventDefault();
+        h.runeContext = false;
     }, { capture: true });
     for (const name of ['pointerdown', 'keydown', 'wheel']) {
-        listen(window, name, event => { if (name !== 'pointerdown' || !isSecondaryPress(event)) disarmMenu(h); }, { capture: true, passive: true });
+        listen(window, name, event => { if (name !== 'pointerdown' || event.target !== canvas || !isSecondaryPress(event)) disarmMenu(h); }, { capture: true, passive: true });
     }
     queueMicrotask(() => {
         if (!h.disposed && !embedded && !page && document.activeElement === document.body) canvas.focus({ preventScroll: true });
@@ -397,7 +407,7 @@ export function syncCopy(h, text) {
 }
 
 // What the right-click Rune just heard is on: 'app' (an element's menu, which Rune draws),
-// 'field', 'text' or '' (`Runtime::secondary_claim`).
+// 'canvas', 'field', 'text' or '' (`Runtime::secondary_claim`).
 export function syncSecondary(h, claim) {
     h.secondary = claim;
 }
@@ -640,8 +650,8 @@ function armMenu(h, x, y, browser) {
     disarmMenu(h);
     const claim = h.secondary === 'app' && browser ? 'text' : h.secondary;
     h.secondary = '';
-    if (claim === 'app') { h.menu = 'rune'; return false; }
-    h.menu = 'browser';
+    if (claim === 'canvas') return false;
+    if (claim === 'app') { h.runeContext = true; return false; }
     if (claim === 'field' && h.key) {
         // The page's field holds the Rune field's text and selection: its menu's Cut, Copy, Paste
         // and Select all edit them, as a page's text field's would.
@@ -703,7 +713,7 @@ function disarmMenu(h) {
         if (h.caret) placeField(h.field, h.caret);
         else Object.assign(h.field.style, { left: '0px', top: '0px', width: '1px', height: '1px', pointerEvents: 'none' });
     }
-    if (h.menu === 'browser') h.menu = '';
+    h.runeContext = false;
 }
 
 function webLink(url) {

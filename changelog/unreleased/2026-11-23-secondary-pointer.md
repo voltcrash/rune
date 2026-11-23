@@ -1,0 +1,1 @@
+- `El::on_secondary_pointer` lets a canvas receive right-button input during a primary drag, including release outside the canvas and cancellation.
