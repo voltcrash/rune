@@ -22,7 +22,7 @@ impl RuntimeCore {
         loop {
             let n = &self.tree.nodes[index];
             if self.subtree_exiting(index) || !self.allowed(index) { break; }
-            if n.handlers.on_secondary_press.is_some() || self.secondary_link_at(index, x, y).is_some() { return Some(&n.path); }
+            if self.captures_secondary(index) || n.handlers.on_secondary_press.is_some() || self.secondary_link_at(index, x, y).is_some() { return Some(&n.path); }
             // A text field's own menu (`field_menu`) wins over its ancestors'.
             if n.input.as_ref().is_some_and(|i| i.access.is_some()) { return Some(&n.path); }
             if text.is_none() && self.is_selectable(index) { text = Some(n.path.as_str()); }
@@ -30,6 +30,11 @@ impl RuntimeCore {
             index = p;
         }
         text
+    }
+
+    fn captures_secondary(&self, i: usize) -> bool {
+        self.takes_button(i, crate::PointerButton::Secondary)
+            && (self.tree.nodes[i].handlers.on_press.is_some() || self.drags_with(i, crate::PointerButton::Secondary))
     }
 
     /// Capture a secondary gesture without activating primary actions or text selection.
@@ -42,6 +47,10 @@ impl RuntimeCore {
         self.dismiss_help();
         let path = self.secondary_target(x, y).map(str::to_owned);
         let i = path.as_ref().and_then(|p| self.tree.nodes.iter().position(|n| n.path == *p));
+        if let Some(i) = i.filter(|&i| self.captures_secondary(i)) {
+            if !self.pointer.press.is_held() { self.capture_button(i, x, y, crate::PointerButton::Secondary, None); }
+            return;
+        }
         self.pointer.set_secondary(match path {
             Some(path) => capture::Secondary::Held { path, link: i.and_then(|i| self.secondary_link_at(i, x, y)), left: false },
             None => capture::Secondary::Up,
@@ -70,6 +79,7 @@ impl RuntimeCore {
     /// a text field, `"text"` on selectable text alone, `""` on nothing of Rune's.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn secondary_claim(&self) -> &'static str {
+        if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) { return "app"; }
         let capture::Secondary::Held { path, link, .. } = self.pointer.secondary() else { return "" };
         let Some(n) = self.tree.nodes.iter().find(|n| n.path == *path) else { return "" };
         if link.is_some() || n.handlers.on_secondary_press.is_some() { return "app"; }
@@ -107,6 +117,10 @@ impl RuntimeCore {
         self.pointer.pos = Some((x, y));
         self.pointer.release_tint(crate::PointerButton::Secondary);
         if self.pointer.autoscroll_release(crate::PointerButton::Secondary) { return; }
+        if self.pointer.press.held().is_some_and(|h| h.button == crate::PointerButton::Secondary) {
+            self.release_capture(app, x, y);
+            return;
+        }
         self.secondary_region_up(x, y);
         let (path, down_link, left) = match self.pointer.take_secondary() {
             capture::Secondary::Held { path, link, left } => (Some(path), link, left),

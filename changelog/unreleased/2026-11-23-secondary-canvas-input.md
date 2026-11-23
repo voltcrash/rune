@@ -1,0 +1,1 @@
+- Canvas controls can capture secondary-button presses, drags and releases with `El::pointer_buttons`. Each `Drag` reports the modifiers held at that phase.

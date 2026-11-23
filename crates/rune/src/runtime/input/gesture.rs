@@ -233,10 +233,14 @@ impl RuntimeCore {
             if middle { self.autoscroll_down(x, y); }
             return;
         };
+        self.capture_button(i, x, y, button, link);
+    }
+
+    pub(super) fn capture_button(&mut self, i: usize, x: f32, y: f32, button: PointerButton, link: Option<usize>) {
         let n = &self.tree.nodes[i];
         let r = n.target;
         let [lx, ly] = self.to_local(i, x, y);
-        let d = Drag { phase: Phase::Down, x: lx, y: ly, w: r[2] - r[0], h: r[3] - r[1], start_x: lx, start_y: ly, dx: 0.0, dy: 0.0, data: 0.0, clicks: 1, cancelled: false, window: [x, y], screen: self.screen_at(x, y) };
+        let d = Drag { phase: Phase::Down, mods: self.kbd.held_mods, x: lx, y: ly, w: r[2] - r[0], h: r[3] - r[1], start_x: lx, start_y: ly, dx: 0.0, dy: 0.0, data: 0.0, clicks: 1, cancelled: false, window: [x, y], screen: self.screen_at(x, y) };
         let path = n.path.clone();
         if self.drags_with(i, button) { self.frame.queue.push(Action::Drag(path.clone(), d, button)); }
         self.pointer.clear_press_clicks();
