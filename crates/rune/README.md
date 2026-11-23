@@ -1346,6 +1346,9 @@ A `ClipboardContent` is plain text plus, optionally, HTML and RTF. Copy formatte
 `tx.copy_rich(ClipboardContent::new("Ship it").with_html("<b>Ship</b> it").with_rtf(rtf))`;
 plain text is always written, so every app can paste it. `copy_secret` stays plain text only.
 
+A field can use `.input_copy_text(|edit| ...)` to copy a custom plain-text representation of its selection.
+For example, a mention chip can copy its full path. Returning `None` preserves the default clipboard formats.
+
 Pasting delivers the richest form the source offered. A field hears it before its editor with
 `.on_input_paste(|s, content, tx| -> bool)`: return true when the app took the paste (say, a
 rich composer parsing `content.html()` into its model), false to let the editor paste

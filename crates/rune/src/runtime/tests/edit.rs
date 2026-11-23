@@ -236,7 +236,8 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
         col().size(320.0, 360.0)
             .child(text_input(&s.a, st).key("a").size(300.0, 140.0).on_edit(|s: &mut App| &mut s.a))
             .child(text_input(&s.b, st).key("b").size(300.0, 140.0).on_edit(|s: &mut App| &mut s.b))
-            .child(text_input(&s.plain, st).key("plain").size(300.0, 40.0).on_edit(|s: &mut App| &mut s.plain))
+            .child(text_input(&s.plain, st).key("plain").size(300.0, 40.0).on_edit(|s: &mut App| &mut s.plain)
+                .input_copy_text(|e| (e.selected() == "chip").then(|| "path/to/chip".to_string())))
     }
     let mut a = TextEdit::from_html(
         "<p>Hello <b>bold</b> <a href=\"https://example.com\">link</a></p><ul><li>one</li><li><i>two</i></li></ul><blockquote>q</blockquote>",
@@ -278,6 +279,15 @@ fn copy_from_one_rich_field_pastes_marks_and_blocks_into_another() {
     rt.key(cmd('c'));
     rt.frame(0.0);
     assert_eq!(m.content().unwrap().html(), None);
+    rt.update(|s, _| { s.plain.replace_text("chip"); s.plain.set_selection(0, 4); });
+    rt.key(cmd('c'));
+    rt.frame(0.0);
+    assert_eq!(m.content().unwrap().text(), "path/to/chip");
+    rt.key(cmd('x'));
+    rt.frame(0.0);
+    assert!(rt.state.plain.text.is_empty());
+    assert_eq!(m.content().unwrap().text(), "path/to/chip");
+
 }
 
 #[test]
