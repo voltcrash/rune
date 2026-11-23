@@ -33,6 +33,7 @@ pub struct ClipboardContent {
     image: Option<ClipboardImage>,
     files: Vec<PathBuf>,
     pub(super) own_pills: bool,
+    pub(super) selection: crate::CopyDestination,
 }
 impl PartialEq for ClipboardContent {
     fn eq(&self, other: &Self) -> bool {
@@ -41,6 +42,9 @@ impl PartialEq for ClipboardContent {
 }
 impl Eq for ClipboardContent {}
 impl ClipboardContent {
+    /// The selection read for this paste. Middle-click on Linux reads the primary selection.
+    pub fn selection(&self) -> crate::CopyDestination { self.selection }
+
     /// Plain text, the form every app can paste. Empty when only other forms carry content.
     pub fn new(text: impl Into<String>) -> Self { Self { text: Wiped(text.into()), ..Self::default() } }
     /// Adds an HTML form (a fragment or a document), for apps that paste formatted text.

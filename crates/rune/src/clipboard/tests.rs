@@ -201,6 +201,13 @@ fn the_worker_answers_reads_with_sanitised_content() {
     let answer = replies.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!((answer.purpose, answer.content.text()), (Purpose::Read(7), "<script>"), "plain text is never rewritten");
     worker.stop();
+    #[cfg(target_os = "linux")]
+    {
+        let read = Purpose::PrimaryPaste("field".into()).reply(Some(ClipboardContent::new("same"))).unwrap();
+        assert_eq!(read.content.selection(), crate::CopyDestination::PrimarySelection);
+        let copied = Purpose::Paste(None, Forms::Text).reply(Some(read.content)).unwrap();
+        assert_eq!(copied.content.selection(), crate::CopyDestination::Clipboard);
+    }
     assert!(Purpose::Paste(None, Forms::Rich).reply(None).is_none());
     let mut board = Board { content: Some(ClipboardContent::new("t").with_html("<b>t</b>")), ..Board::default() };
     let plain = Purpose::Paste(None, Forms::Text).answer(&mut board).unwrap().content;

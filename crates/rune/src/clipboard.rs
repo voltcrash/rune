@@ -114,6 +114,8 @@ enum Purpose {
     /// Cmd/Ctrl-V or `Tx::request_paste`, for this focused field or (`None`) the app, and the
     /// forms that target takes.
     Paste(Option<String>, Forms),
+    #[cfg(target_os = "linux")]
+    PrimaryPaste(String),
     /// `Tx::read_clipboard`'s callback with this id. It always hears back, empty or not.
     Read(u64),
 }
@@ -147,7 +149,12 @@ impl Purpose {
         Purpose::Paste(target, forms)
     }
     fn forms(&self) -> Forms {
-        match self { Purpose::Paste(_, forms) => *forms, Purpose::Read(_) => Forms::All }
+        match self {
+            Purpose::Paste(_, forms) => *forms,
+            #[cfg(target_os = "linux")]
+            Purpose::PrimaryPaste(_) => Forms::Text,
+            Purpose::Read(_) => Forms::All,
+        }
     }
     /// Reads what this purpose needs from `cb` and what to send back: a paste skips an empty
     /// clipboard.
@@ -159,11 +166,16 @@ impl Purpose {
         self.reply(content)
     }
     fn reply(self, content: Option<ClipboardContent>) -> Option<Reply> {
-        let content = match self {
-            Purpose::Paste(..) => content?,
+        let mut content = match self {
             Purpose::Read(_) => content.unwrap_or_default(),
+            _ => content?,
+        }.untrusted();
+        content.selection = match self {
+            #[cfg(target_os = "linux")]
+            Purpose::PrimaryPaste(_) => crate::CopyDestination::PrimarySelection,
+            _ => crate::CopyDestination::Clipboard,
         };
-        Some(Reply { purpose: self, content: content.untrusted() })
+        Some(Reply { purpose: self, content })
     }
 }
 
@@ -216,6 +228,8 @@ impl Client {
 fn deliver(rt: &mut crate::runtime::RuntimeCore, reply: Reply) {
     match reply.purpose {
         Purpose::Paste(target, _) => rt.paste_result(target, reply.content),
+        #[cfg(target_os = "linux")]
+        Purpose::PrimaryPaste(target) => rt.paste_result(Some(target), reply.content),
         Purpose::Read(id) => rt.read_result(id, reply.content),
     }
 }

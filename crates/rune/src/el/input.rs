@@ -2,9 +2,10 @@
 
 use super::*;
 
-/// Which selection receives the text copied from an input.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The system clipboard or the Linux primary selection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CopyDestination {
+    #[default]
     Clipboard,
     PrimarySelection,
 }
