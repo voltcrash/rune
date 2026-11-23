@@ -30,12 +30,19 @@ impl RuntimeCore {
 
     /// After a frame's handlers, once the release's caret and selection landed: puts what's
     /// selected on the primary selection, if it changed.
-    pub(in crate::runtime) fn note_primary_selection(&mut self, app: &dyn ViewDriver) {
+    pub(in crate::runtime) fn note_primary_selection(&mut self, app: &mut dyn AppDriver) {
         if !std::mem::take(&mut self.edit.primary.pending) { return; }
         let text = match self.focused_input() {
-            Some(input) if input.edit.is_secure() || input.edit.anchor == input.edit.focus => None,
-            Some(input) => input.copy_text.as_ref().and_then(|f| f(&input.edit, crate::CopyDestination::PrimarySelection))
-                .or_else(|| Some(input.edit.selected().to_owned())).filter(|t| !t.is_empty()),
+            Some(input) => {
+                let edit = match &input.access {
+                    Some(access) => &*access(app.states()),
+                    None => &input.edit,
+                };
+                let (start, end) = edit.range();
+                if input.edit.is_secure() || edit.is_secure() || start == end { return; }
+                input.copy_text.as_ref().and_then(|f| f(edit, crate::CopyDestination::PrimarySelection))
+                    .or_else(|| Some(edit.selected().to_owned())).filter(|t| !t.is_empty())
+            }
             None => self.selected_text(app),
         };
         let Some(text) = text else { return };
