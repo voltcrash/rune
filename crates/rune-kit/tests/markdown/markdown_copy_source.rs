@@ -157,6 +157,13 @@ fn a_drag_starting_on_a_file_link_copies_it_and_a_click_still_opens_it() {
     rt.frame(0.);
     assert_eq!(rt.selected_text().as_deref(), Some("main.rs i"), "Shift-drag extends the original anchor");
     assert_eq!(rt.state.opened, 2);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods { shift: true, ..Mods::default() }));
+    rt.pointer_down(right - 1., cy);
+    rt.pointer_move(right - 0.8, cy);
+    rt.pointer_up(right - 0.8, cy);
+    rt.physical_input(rune::PhysicalInput::Modifiers(Mods::default()));
+    rt.frame(0.);
+    assert_eq!(rt.state.opened, 3, "small pointer motion within the same caret still clicks");
 }
 
 #[test]

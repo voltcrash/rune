@@ -335,6 +335,7 @@ impl RuntimeCore {
             self.frame.queue.push(Action::Press(path.clone(), crate::PointerButton::Primary, false));
         }
         let mut held = capture::Held::new(path, d, crate::PointerButton::Primary, (x, y), now, second, drag_out).on_link(link).pressed_on_down(on_down);
+        held.link_focus = link.and_then(|_| self.link_selection_focus(&held.path));
         held.touch = touch;
         self.pointer.press.hold(held);
     }

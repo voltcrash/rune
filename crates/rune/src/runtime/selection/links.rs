@@ -228,6 +228,12 @@ impl RuntimeCore {
             .find(|(_, r)| contains(*r, x, y)).map(|(k, _)| k)
     }
 
+    pub(in crate::runtime) fn link_selection_focus(&self, path: &str) -> Option<usize> {
+        let selection = self.edit.selectable.phase.selection()?;
+        let focus_path = selection.far.as_ref().map_or(&selection.path, |far| &far.path);
+        (focus_path == path).then_some(selection.focus)
+    }
+
     /// Link presses break the paragraph's click sequence. A copyable link can anchor or extend a drag.
     pub(in crate::runtime) fn selection_clicks(&mut self, i: usize, x: f32, y: f32) -> Option<u32> {
         if let Some(k) = self.link_at(i, x, y) {

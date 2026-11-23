@@ -537,7 +537,10 @@ impl RuntimeCore {
 
     /// The held press is selecting text by dragging, and has selected some.
     pub(in crate::runtime) fn selected_by_drag(&self) -> bool {
-        self.edit.selectable.phase.dragging() && self.pointer.press_held().is_some_and(|h| h.moved || (h.link.is_some() && self.pointer.pos != Some(h.at))) && (!self.selection_ranges().is_empty() || self.has_nonempty_selection())
+        let Some(h) = self.pointer.press_held() else { return false };
+        self.edit.selectable.phase.dragging()
+            && (h.moved || (h.link_focus.is_some() && self.link_selection_focus(&h.path) != h.link_focus))
+            && (!self.selection_ranges().is_empty() || self.has_nonempty_selection())
     }
 
     pub(in crate::runtime) fn clear_text_selection(&mut self) {
