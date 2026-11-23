@@ -42,7 +42,7 @@ impl Client {
     pub(super) fn flush_primary(&self, rt: &mut crate::runtime::RuntimeCore) {
         if let Some(write) = rt.edit.primary.write.take() { worker().send(Request::Write(write, None)).ok(); }
         if let Some(target) = rt.edit.primary.paste.take() {
-            let purpose = Purpose::Paste(Some(target), Forms::Text);
+            let purpose = Purpose::PrimaryPaste(target);
             worker().send(Request::Read { purpose, reply: self.sender.clone(), wake: self.wake.clone() }).ok();
         }
     }
