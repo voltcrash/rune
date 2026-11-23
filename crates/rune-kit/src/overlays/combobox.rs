@@ -237,7 +237,7 @@ impl<S: 'static> ComboboxBind for ComboboxHandlers<S> {
     fn build_list(&self, list: PopupListCore, options: Rc<Vec<ComboboxOption>>, choices: Vec<usize>, k: &Kit) -> El {
         let (hover_access, choose_access, choose) = (self.access.clone(), self.access.clone(), self.choose.clone());
         let handlers: PopupHandlers<S> = PopupHandlers {
-            on_point: None,
+            point_on_motion: false,
             on_active: Some(Rc::new(move |s: &mut S, i| on_option_hover(hover_access(s), &options, &choices, i))),
             on_choose: Some(Rc::new(move |s: &mut S, id: &str, tx: &mut Tx| {
                 choose_access(s).close();

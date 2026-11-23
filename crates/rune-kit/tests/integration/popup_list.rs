@@ -269,6 +269,9 @@ fn moving_an_option_under_a_stationary_pointer_preserves_the_keyboard_choice() {
     rt.update(|s, _| { s.active = Some(3); s.swap_options = true; });
     for _ in 0..60 { rt.frame(1.0 / 60.0); }
     assert_eq!(rt.state.active, Some(3));
+    rt.pointer_up(x, y);
+    rt.frame(0.0);
+    assert_eq!(rt.state.active, Some(3), "a stationary release is not navigation");
     rt.pointer_move(x + 1.0, y);
     rt.frame(0.0);
     assert_eq!(rt.state.active, Some(2));
@@ -288,6 +291,13 @@ fn hover_changes_do_not_scroll_now_or_on_the_next_frame() {
     let after = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("commands-option-cmd-8")).unwrap().rect;
     assert_eq!(before, after, "hovering a partly clipped row must not reveal it");
     assert_eq!(rt.state.hovered, [8]);
+    rt.update(|s, _| { s.pointer_navigation = true; s.active = Some(7); });
+    rt.frame(0.0);
+    rt.pointer_move(x + 1.0, y);
+    for _ in 0..4 { rt.frame(1.0 / 60.0); }
+    assert_eq!(rt.state.active, Some(8));
+    let after_motion = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("commands-option-cmd-8")).unwrap().rect;
+    assert_eq!(before, after_motion, "pointing inside the same partly clipped row must not reveal it");
 }
 
 #[test]

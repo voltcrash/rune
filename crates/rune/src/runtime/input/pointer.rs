@@ -25,7 +25,7 @@ impl RuntimeCore {
                 self.frame.queue.push(Action::PointerMove(self.tree.nodes[i].path.clone(), point));
             }
         }
-        self.refresh_hover(x, y);
+        self.refresh_hover(x, y, moved);
         let Some(held) = self.pointer.press.held() else { return };
         let (path, d, at, button) = (held.path.clone(), held.drag, held.at, held.button);
         if held.drag_out.is_some_and(|threshold| crate::drag_out::past_threshold(at, (x, y), threshold)) && self.start_drag_out(app, path.clone()) {

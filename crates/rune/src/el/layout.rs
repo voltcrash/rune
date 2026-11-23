@@ -673,10 +673,20 @@ impl El {
     /// Called once when the pointer enters this hit target, not on animation frames.
     #[track_caller]
     pub fn on_hover<S: 'static>(mut self, f: impl Fn(&mut S) + 'static) -> Self {
+        self.handlers.hover_on_motion = false;
         self.handlers.on_hover = Some(Rc::new(move |s, _| f(downcast::<S>(s))));
         #[cfg(debug_assertions)]
         { self.handlers.sites.hover = Some(std::panic::Location::caller()); }
         self
+    }
+
+    /// Like [`Self::on_hover`], but only when the pointer moves over this hit target.
+    /// Choosing either callback replaces the other.
+    #[track_caller]
+    pub fn on_point<S: 'static>(self, f: impl Fn(&mut S) + 'static) -> Self {
+        let mut el = self.on_hover(f);
+        el.handlers.hover_on_motion = true;
+        el
     }
 
     /// Called with `true` when the pointer enters this element's visible rect and `false` when
