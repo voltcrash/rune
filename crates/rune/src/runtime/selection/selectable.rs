@@ -369,21 +369,21 @@ impl RuntimeCore {
     /// truncates the returned string on a character boundary.
     pub(crate) fn selected_text(&self, app: &dyn ViewDriver) -> Option<String> {
         if self.selection_spans_unmounted() {
-            return self.collect_virtual_selection(app, None).map(|s| s.text);
+            return self.collect_virtual_selection(app, None, false).map(|s| s.text);
         }
-        let out = self.joined(&self.selection_ranges());
+        let out = self.joined(&self.selection_ranges(), false);
         (!out.is_empty()).then_some(out)
     }
 
     /// The selection as [`Tx::text_selection`] reads it, `None` with nothing selected.
     pub(crate) fn selection(&self, app: &dyn ViewDriver) -> Option<TextSelection> {
         if self.selection_spans_unmounted() {
-            return self.collect_virtual_selection(app, None);
+            return self.collect_virtual_selection(app, None, false);
         }
         let ranges = self.selection_ranges();
         if ranges.is_empty() { return None; }
-        let texts = ranges.iter().map(|&(i, a, b)| self.selected_piece(i, a..b, None)).collect();
-        Some(TextSelection { texts, text: self.joined(&ranges), backward: self.selection_backward() })
+        let texts = ranges.iter().map(|&(i, a, b)| self.selected_piece(i, a..b, None, false)).collect();
+        Some(TextSelection { texts, text: self.joined(&ranges, false), backward: self.selection_backward() })
     }
 
     /// [`Runtime::selection`] for a handler's `Tx`, kept until a commit or the selection changes.
@@ -467,7 +467,7 @@ impl RuntimeCore {
     }
 
     /// Node `i` as a [`SelectedText`] with `range` selected, its path relative to `base`'s.
-    pub(in crate::runtime) fn selected_piece(&self, i: usize, range: Range<usize>, base: Option<usize>) -> SelectedText {
+    pub(in crate::runtime) fn selected_piece(&self, i: usize, range: Range<usize>, base: Option<usize>, for_copy: bool) -> SelectedText {
         let n = &self.tree.nodes[i];
         let path = match base {
             Some(b) if b == i => String::new(),
@@ -478,7 +478,7 @@ impl RuntimeCore {
         let (full_a, full_b) = n.text.as_ref().filter(|t| !t.cold.uncopied.is_empty())
             .map_or((0, len), |t| trim_uncopied(&t.cold.uncopied, (0, len)));
         let whole = !range.is_empty() && len > 0 && range.start <= full_a && range.end >= full_b;
-        let text = n.text.as_ref().and_then(|t| t.copy_slice(range.start as u32, range.end as u32)).unwrap_or_default();
+        let text = n.text.as_ref().and_then(|t| t.selection_slice(range.start as u32, range.end as u32, for_copy)).unwrap_or_default();
         let content = self.content_of(i).get(range.clone()).unwrap_or_default().to_owned();
         SelectedText { path, key: n.key.clone(), range, len, whole, text, content }
     }
@@ -491,7 +491,7 @@ impl RuntimeCore {
         }
         let ranges = self.selection_ranges();
         let (&(first, ..), &(last, ..)) = (ranges.first()?, ranges.last()?);
-        let drawn = self.joined(&ranges);
+        let drawn = self.joined(&ranges, true);
         let around = |a: usize, j: usize| std::iter::successors(Some(j), |&p| self.tree.nodes[p].parent).any(|p| p == a);
         let provider = std::iter::successors(Some(first), |&p| self.tree.nodes[p].parent)
             .find(|&p| self.tree.nodes[p].handlers.selection_copy.is_some() && around(p, last));
@@ -501,7 +501,7 @@ impl RuntimeCore {
                 .take_while(|&j| around(p, j))
                 .filter(|&j| self.is_selectable(j) && !self.subtree_exiting(j) && self.allowed(j))
                 .filter(|&j| match g { Some(g) => self.group_of(j) == Some(g), None => j == first })
-                .map(|j| self.selected_piece(j, range_in(&ranges, j).map_or(0..0, |(a, b)| a..b), Some(p)))
+                .map(|j| self.selected_piece(j, range_in(&ranges, j).map_or(0..0, |(a, b)| a..b), Some(p), true))
                 .collect();
             if let Some(text) = f(&TextSelection { texts, text: drawn.clone(), backward: self.selection_backward() }) { return Some(text); }
         }
@@ -509,12 +509,12 @@ impl RuntimeCore {
     }
 
     /// The texts of `ranges` joined as copying joins them.
-    fn joined(&self, ranges: &[(usize, usize, usize)]) -> String {
+    fn joined(&self, ranges: &[(usize, usize, usize)], for_copy: bool) -> String {
         let mut out = CopyJoin::default();
         let mut prev: Option<usize> = None;
         for &(i, a, b) in ranges {
             let Some(spec) = self.tree.nodes[i].text.as_ref() else { continue };
-            let Some(piece) = spec.copy_slice(a as u32, b as u32) else { continue };
+            let Some(piece) = spec.selection_slice(a as u32, b as u32, for_copy) else { continue };
             out.push(spec, a..b, &piece, prev.is_some_and(|p| self.beside(p, i)), usize::MAX);
             prev = Some(i);
         }

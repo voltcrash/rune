@@ -243,6 +243,24 @@ pub fn flatten_spans(spans: &[Span]) -> Vec<Span> {
     out
 }
 
+/// The plain clipboard representation of a fully selected link or file chip.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LinkCopy {
+    pub text: String,
+    pub prefix: Option<String>,
+}
+
+impl LinkCopy {
+    /// Copy this text when the selection holds the whole link.
+    pub fn new(text: impl Into<String>) -> Self { Self { text: text.into(), prefix: None } }
+
+    /// Include the adjacent caption in the replacement when the selection contains it too.
+    pub fn including_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+}
+
 /// A pressable byte range of a text element: a link, an @mention, a file chip. Attach with
 /// [`El::link`](crate::El::link) and handle with [`El::on_link`](crate::El::on_link). Its resting
 /// look is whatever [`Span`]s cover it; [`LinkPaint`]s add the hover, pressed and focus looks.
@@ -266,6 +284,8 @@ pub struct Link {
     pub focused: Option<LinkPaint>,
     #[doc(hidden)]
     pub help: Option<String>,
+    #[doc(hidden)]
+    pub copy_text: Option<Box<LinkCopy>>,
 }
 
 impl Link {
@@ -281,6 +301,7 @@ impl Link {
             pressed: None,
             focused: None,
             help: None,
+            copy_text: None,
         }
     }
     /// Accessibility role, such as "button" for a file chip.
@@ -307,6 +328,12 @@ impl Link {
     /// its text colour when that is empty.
     pub fn focused(mut self, paint: LinkPaint) -> Self {
         self.focused = Some(paint);
+        self
+    }
+    /// Plain clipboard text for a selection containing the whole link. A partial selection
+    /// copies the selected letters. Rich clipboard content keeps the displayed label.
+    pub fn copy_text(mut self, text: LinkCopy) -> Self {
+        self.copy_text = Some(Box::new(text));
         self
     }
     /// A tooltip for this link alone, as [`El::help`](crate::El::help) is for an element:

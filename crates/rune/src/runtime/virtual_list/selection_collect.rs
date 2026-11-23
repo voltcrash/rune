@@ -29,13 +29,13 @@ impl RuntimeCore {
         };
         let (n0, n1) = (node_for(h)?, node_for(f)?);
         if let Some((p, copy_fn)) = self.tree.selection_copy_provider(n0, n1) {
-            let sel = self.collect_virtual_selection(app, Some(p))?;
+            let sel = self.collect_virtual_selection(app, Some(p), true)?;
             if let Some(text) = copy_fn(&sel) {
                 return Some(text);
             }
             return Some(sel.text);
         }
-        self.collect_virtual_selection(app, None).map(|s| s.text)
+        self.collect_virtual_selection(app, None, true).map(|s| s.text)
     }
 
     /// Builds an unmounted row `r` of `list_path` on demand (view only, no layout/mount/GPU) and
@@ -90,7 +90,7 @@ impl RuntimeCore {
 
     /// Collects the full [`TextSelection`] when the selection touches offscreen or unbuilt rows,
     /// bounded by [`MAX_VIRTUAL_COPY_ROWS`] and [`MAX_VIRTUAL_COPY_BYTES`].
-    pub(crate) fn collect_virtual_selection(&self, app: &dyn ViewDriver, base: Option<usize>) -> Option<TextSelection> {
+    pub(crate) fn collect_virtual_selection(&self, app: &dyn ViewDriver, base: Option<usize>, for_copy: bool) -> Option<TextSelection> {
         let h = self.selection_holder_end()?;
         let f = self.focus_holder_end(h)?;
         let sel = self.edit.selectable.phase.selection()?;
@@ -101,14 +101,14 @@ impl RuntimeCore {
             return match h {
                 EndRef::Mounted(i) => {
                     if a >= b || b > self.content_of(i).len() { return None; }
-                    let piece = self.selected_piece(i, a..b, base);
+                    let piece = self.selected_piece(i, a..b, base, for_copy);
                     let text = piece.text().to_owned();
                     Some(TextSelection { texts: vec![piece], text, backward: self.selection_backward() })
                 }
                 EndRef::Offscreen(vi, ti) => {
                     let t = self.offscreen_text(vi, ti);
                     if a >= b || b > t.spec.content.len() { return None; }
-                    let piece = offscreen_piece(t, a..b, base_path);
+                    let piece = offscreen_piece(t, a..b, base_path, for_copy);
                     let text = piece.text().to_owned();
                     Some(TextSelection { texts: vec![piece], text, backward: self.selection_backward() })
                 }
@@ -141,7 +141,7 @@ impl RuntimeCore {
                     let a = if end_ref == first_end { first_byte.min(len) } else { 0 };
                     let b = if end_ref == last_end { last_byte.min(len) } else { len };
                     if a >= b { continue; }
-                    let piece = offscreen_piece(t, a..b, base_path);
+                    let piece = offscreen_piece(t, a..b, base_path, for_copy);
                     let hit_cap = out.push(&t.spec, a..b, piece.text(), t.tab_before, MAX_VIRTUAL_COPY_BYTES);
                     texts.push(piece);
                     if hit_cap { break; }
@@ -176,7 +176,7 @@ impl RuntimeCore {
             let a = if end_ref == first_end { first_byte.min(len) } else { 0 };
             let b = if end_ref == last_end { last_byte.min(len) } else { len };
             if a >= b { return false; }
-            let piece = self.selected_piece(j, a..b, base);
+            let piece = self.selected_piece(j, a..b, base, for_copy);
             let Some(spec) = self.tree.nodes[j].text.as_ref() else { return false };
             let beside = prev_mounted.is_some_and(|p| self.beside(p, j));
             let capped = out.push(spec, a..b, piece.text(), beside, MAX_VIRTUAL_COPY_BYTES);
@@ -241,7 +241,7 @@ impl RuntimeCore {
                         let a = if ord == first_ord { first_byte.min(len) } else { 0 };
                         let b = if ord == last_ord { last_byte.min(len) } else { len };
                         if a >= b { continue; }
-                        let piece = offscreen_piece(t, a..b, base_path);
+                        let piece = offscreen_piece(t, a..b, base_path, for_copy);
                         let capped = out.push(&t.spec, a..b, piece.text(), !first_in_row && t.tab_before, MAX_VIRTUAL_COPY_BYTES);
                         texts.push(piece);
                         first_in_row = false;

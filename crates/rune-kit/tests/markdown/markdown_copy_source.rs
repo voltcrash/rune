@@ -77,6 +77,24 @@ fn without_copy_source_copying_takes_the_drawn_text() {
     assert_eq!(all, "Title\n\nHello world and link.\n\n- alpha\n- [x] beta\n\nfn main() {}\n\nLast line.");
 }
 
+#[test]
+fn a_whole_file_link_copies_its_reference_inside_a_paragraph() {
+    let mut rt = Runtime::new((), |_, _| Markdown::new("see API [main.rs](src/main.rs#L12) here")
+        .selectable(true)
+        .link_copy_text(|url| Some(rune::LinkCopy::new(format!("[API]({url})")).including_prefix("API ")))
+        .on_link(|_: &mut (), _| {})
+        .build(&Kit::neutral(true)).key("note"), (360., 140.), Env::new(true, 1.));
+    rt.frame(0.);
+    let clipboard = rune::clipboard::memory();
+    rt.use_clipboard(&clipboard);
+    let text = rt.elements().into_iter().find(|e| e.path.ends_with("note/b0")).unwrap().text.unwrap();
+    let start = text.find("main.rs").unwrap();
+    assert_eq!(copy(&mut rt, &clipboard, |tx| tx.select_text("note/b0", start..start + 7)), "[API](src/main.rs#L12)");
+    assert_eq!(rt.selected_text().as_deref(), Some("main.rs"));
+    assert_eq!(copy(&mut rt, &clipboard, |tx| tx.select_text("note/b0", start..start + 4)), "main");
+    assert_eq!(copy(&mut rt, &clipboard, |tx| tx.select_all_text("note/b0")), "see [API](src/main.rs#L12) here");
+}
+
 #[derive(Default)]
 struct Keys { takes: bool, keys: Vec<Key> }
 

@@ -98,7 +98,12 @@ fn paragraph(t: &TextSpec, k: usize, (a, b): (usize, usize), last: bool, e: &mut
     // A plain text's paragraphs share its empty cold fields.
     if !t.cold.is_empty() {
         let cold = &mut *p.cold;
-        cold.links = t.cold.links.iter().filter_map(|l| clip(l.start, l.end).map(|(start, end)| Link { start, end, ..l.clone() })).collect();
+        cold.links = t.cold.links.iter().filter_map(|l| {
+            let (start, end) = clip(l.start, l.end)?;
+            let mut link = Link { start, end, ..l.clone() };
+            if l.start < a32 || l.end > b32 { link.copy_text = None; }
+            Some(link)
+        }).collect();
         cold.uncopied = t.cold.uncopied.iter().filter_map(|&(s, e)| clip(s, e)).collect();
         cold.rings = t.cold.rings.iter().filter_map(|&(s, e, c, w)| clip(s, e).map(|(s, e)| (s, e, c, w))).collect();
         cold.strikes = t.cold.strikes.iter().filter_map(|&(s, e, c)| clip(s, e).map(|(s, e)| (s, e, c))).collect();
