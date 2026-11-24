@@ -46,6 +46,7 @@ pub struct MenuItem {
     /// Checkbox and radio items: whether the indicator shows.
     checked: Option<bool>,
     sub: Option<(Vec<MenuEntry>, bool)>,
+    sub_min_width: f32,
     state: State,
     acts: Acts,
 }
@@ -62,6 +63,7 @@ impl MenuItem {
             danger: false,
             checked: None,
             sub: None,
+            sub_min_width: 160.0,
             state: State::Rest,
             acts: Acts::default(),
         }
@@ -99,6 +101,12 @@ impl MenuItem {
         self.checked = Some(on);
         self
     }
+    /// The submenu's minimum width; truncating labels never widen it past this.
+    pub fn submenu_min_width(mut self, w: f32) -> Self {
+        self.sub_min_width = w;
+        self
+    }
+
     /// A submenu trigger; `open` shows its entries to the right.
     pub fn submenu(mut self, entries: Vec<MenuEntry>, open: bool) -> Self {
         self.sub = Some((entries, open));
@@ -227,7 +235,7 @@ impl MenuItem {
                 c.text_faint
             }));
             if open {
-                let sub = Menu { key: format!("{key}-sub"), entries, standard, min_width: 160.0, ..Menu::new("") };
+                let sub = Menu { key: format!("{key}-sub"), entries, standard, min_width: self.sub_min_width, ..Menu::new("") };
                 let mut deeper = Vec::new();
                 let surface = sub.surface(k, &mut deeper);
                 layer.push(anchored(k, surface, &key, Placement::RightStart, 0.0));
